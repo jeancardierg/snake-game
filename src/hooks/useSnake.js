@@ -6,9 +6,11 @@ const INIT_DIR   = { x: 1, y: 0 };
 
 function randomFood(snake) {
   let pos;
+  let attempts = 0;
   do {
     pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
-  } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+    attempts++;
+  } while (attempts < 1000 && snake.some(s => s.x === pos.x && s.y === pos.y));
   return pos;
 }
 
@@ -20,27 +22,46 @@ export function useSnake() {
   const [levelIndex, setLevel]  = useState(0);
   const [state, setState]       = useState('idle'); // idle | running | paused | dead
 
-  const dirRef     = useRef(INIT_DIR);
-  const nextDirRef = useRef(INIT_DIR);
-  const snakeRef   = useRef(INIT_SNAKE);
-  const foodRef    = useRef({ x: 15, y: 10 });
-  const scoreRef   = useRef(0);
-  const bestRef    = useRef(parseInt(localStorage.getItem('snakeBest') || '0'));
-  const levelRef   = useRef(0);
+  const dirRef      = useRef(INIT_DIR);
+  // Input queue: buffer up to 2 pending directions so rapid inputs aren't lost
+  const dirQueueRef = useRef([]);
+  const snakeRef    = useRef(INIT_SNAKE);
+  const foodRef     = useRef({ x: 15, y: 10 });
+  const scoreRef    = useRef(0);
+  const bestRef     = useRef(parseInt(localStorage.getItem('snakeBest') || '0'));
+  const levelRef    = useRef(0);
   const intervalRef = useRef(null);
-  const stateRef   = useRef('idle');
+  const stateRef    = useRef('idle');
 
-  const stopLoop = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-  };
+  const stopLoop = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  // tick and startLoop share a ref to avoid circular useCallback dependency
+  const tickRef = useRef(null);
 
   const startLoop = useCallback((lvlIdx) => {
     stopLoop();
-    intervalRef.current = setInterval(() => tick(), LEVELS[lvlIdx ?? levelRef.current].speed);
-  }, []);
+    intervalRef.current = setInterval(
+      () => tickRef.current?.(),
+      LEVELS[lvlIdx ?? levelRef.current].speed
+    );
+  }, [stopLoop]);
 
   const tick = useCallback(() => {
-    dirRef.current = { ...nextDirRef.current };
+    // Consume next queued direction
+    if (dirQueueRef.current.length > 0) {
+      const next = dirQueueRef.current.shift();
+      const cur = dirRef.current;
+      // Reject 180-degree reversal
+      if (!(next.x === -cur.x && next.y === -cur.y)) {
+        dirRef.current = next;
+      }
+    }
+
     const head = {
       x: snakeRef.current[0].x + dirRef.current.x,
       y: snakeRef.current[0].y + dirRef.current.y,
@@ -64,10 +85,11 @@ export function useSnake() {
       if (newScore > bestRef.current) {
         bestRef.current = newScore;
         setBest(newScore);
-        localStorage.setItem('snakeBest', newScore);
+        // Write best only when beaten (not every tick)
+        localStorage.setItem('snakeBest', String(newScore));
       }
 
-      // Level up check
+      // Level up
       let lvl = levelRef.current;
       while (lvl < LEVELS.length - 1 && newScore >= LEVELS[lvl].scoreNext) lvl++;
       if (lvl !== levelRef.current) {
@@ -85,18 +107,29 @@ export function useSnake() {
 
     snakeRef.current = newSnake;
     setSnake([...newSnake]);
-  }, [startLoop]);
+  }, [startLoop]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep tickRef current so startLoop's setInterval always calls the latest tick
+  tickRef.current = tick;
 
   const die = useCallback(() => {
     stopLoop();
     stateRef.current = 'dead';
     setState('dead');
-  }, []);
+  }, [stopLoop]);
 
   const applyDir = useCallback((newDir) => {
-    const cur = dirRef.current;
-    if (newDir.x === -cur.x && newDir.y === -cur.y) return;
-    nextDirRef.current = newDir;
+    // Determine what current direction will be after queued moves
+    const last = dirQueueRef.current.length > 0
+      ? dirQueueRef.current[dirQueueRef.current.length - 1]
+      : dirRef.current;
+    // Reject 180-degree reversal and duplicates
+    if (newDir.x === -last.x && newDir.y === -last.y) return;
+    if (newDir.x === last.x && newDir.y === last.y) return;
+    // Cap queue at 2
+    if (dirQueueRef.current.length < 2) {
+      dirQueueRef.current.push(newDir);
+    }
     if (stateRef.current === 'idle') {
       stateRef.current = 'running';
       setState('running');
@@ -114,7 +147,7 @@ export function useSnake() {
       setState('running');
       startLoop(levelRef.current);
     }
-  }, [startLoop]);
+  }, [startLoop, stopLoop]);
 
   const reset = useCallback(() => {
     stopLoop();
@@ -123,7 +156,7 @@ export function useSnake() {
     const initFood  = randomFood(initSnake);
     snakeRef.current    = initSnake;
     dirRef.current      = initDir;
-    nextDirRef.current  = initDir;
+    dirQueueRef.current = [];
     foodRef.current     = initFood;
     scoreRef.current    = 0;
     levelRef.current    = 0;
@@ -133,7 +166,7 @@ export function useSnake() {
     setScore(0);
     setLevel(0);
     setState('idle');
-  }, []);
+  }, [stopLoop]);
 
   // Keyboard handler
   useEffect(() => {
@@ -154,6 +187,24 @@ export function useSnake() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [applyDir, pause, reset]);
+
+  // Auto-pause when tab loses visibility
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden && stateRef.current === 'running') {
+        stopLoop();
+        stateRef.current = 'paused';
+        setState('paused');
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [stopLoop]);
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => stopLoop();
+  }, [stopLoop]);
 
   return { snake, food, score, best, levelIndex, state, applyDir, pause, reset };
 }

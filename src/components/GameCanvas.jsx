@@ -21,17 +21,22 @@ const SIZE = COLS * CELL;  // logical canvas size in pixels (400 × 400 at defau
 // The background and grid lines are static — they never change during a game.
 // We draw them once into an offscreen canvas and blit with one drawImage() call
 // each frame, replacing ~41 individual stroke() calls with a single copy.
-let gridCache = null;
+//
+// The cache is keyed by devicePixelRatio so it is rebuilt automatically when
+// the user zooms or moves the window to a display with a different DPI.
+let gridCache    = null;
+let gridCacheDpr = 0;
 
 function getGridCanvas() {
-  if (gridCache) return gridCache;  // already built — skip redraw
+  const dpr = window.devicePixelRatio || 1;
+  if (gridCache && gridCacheDpr === dpr) return gridCache;  // cache hit
 
   const offscreen = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
   offscreen.width  = SIZE * dpr;
   offscreen.height = SIZE * dpr;
 
   const ctx = offscreen.getContext('2d');
+  if (!ctx) return null;  // canvas 2d context unavailable — caller must guard
   ctx.scale(dpr, dpr);
 
   // Solid dark background
@@ -52,7 +57,8 @@ function getGridCanvas() {
   }
   ctx.stroke();
 
-  gridCache = offscreen;
+  gridCacheDpr = dpr;
+  gridCache    = offscreen;
   return offscreen;
 }
 
@@ -81,11 +87,15 @@ export function GameCanvas({ snake, food, levelIndex }) {
     }
 
     const ctx = canvas.getContext('2d');
+    // getContext returns null if the browser can't provide a 2d context
+    if (!ctx) return;
     // All draw coordinates are in logical pixels; transform scales to physical
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // ── Layer 1: background + grid (cached offscreen canvas) ──────────────────
-    ctx.drawImage(getGridCanvas(), 0, 0, SIZE, SIZE);
+    const grid = getGridCanvas();
+    if (!grid) return;  // offscreen canvas context unavailable
+    ctx.drawImage(grid, 0, 0, SIZE, SIZE);
 
     // ── Layer 2: food ─────────────────────────────────────────────────────────
     // Center the circle within its cell

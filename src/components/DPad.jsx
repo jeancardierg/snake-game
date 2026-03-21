@@ -13,13 +13,14 @@
  *   - onClick is kept so the D-Pad also works with mouse clicks.
  */
 import { useRef } from 'react';
+import { DIR } from '../constants';
 
-// Defined outside the component — static data, no need to recreate on each render
+// Direction vectors imported from constants so there is a single source of truth.
 const DIRS = [
-  { label: '▲', dir: { x: 0, y: -1 }, pos: 'up',    ariaLabel: 'Move up' },
-  { label: '◄', dir: { x: -1, y: 0 }, pos: 'left',  ariaLabel: 'Move left' },
-  { label: '▼', dir: { x: 0, y: 1 },  pos: 'down',  ariaLabel: 'Move down' },
-  { label: '►', dir: { x: 1, y: 0 },  pos: 'right', ariaLabel: 'Move right' },
+  { label: '▲', dir: DIR.UP,    pos: 'up',    ariaLabel: 'Move up' },
+  { label: '◄', dir: DIR.LEFT,  pos: 'left',  ariaLabel: 'Move left' },
+  { label: '▼', dir: DIR.DOWN,  pos: 'down',  ariaLabel: 'Move down' },
+  { label: '►', dir: DIR.RIGHT, pos: 'right', ariaLabel: 'Move right' },
 ];
 
 /**

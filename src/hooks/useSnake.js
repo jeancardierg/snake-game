@@ -37,6 +37,9 @@ function randomFood(snake) {
     pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
     attempts++;
   } while (attempts < 1000 && snake.some(s => s.x === pos.x && s.y === pos.y));
+  // Return null if the board is too full to find a free cell after 1000 tries.
+  // Caller must handle null (keeps existing food in place).
+  if (snake.some(s => s.x === pos.x && s.y === pos.y)) return null;
   return pos;
 }
 
@@ -48,8 +51,9 @@ export function useSnake() {
   const [food, setFood]         = useState({ x: 15, y: 10 });
   const [score, setScore]       = useState(0);
   const [best, setBest]         = useState(
-    // Lazy initializer: reads localStorage only on first render
-    () => parseInt(localStorage.getItem('snakeBest') || '0')
+    // Lazy initializer: reads localStorage only on first render.
+    // try-catch guards against SecurityError in private browsing / iframes.
+    () => { try { return parseInt(localStorage.getItem('snakeBest') || '0'); } catch { return 0; } }
   );
   const [levelIndex, setLevel]  = useState(0);
   const [state, setState]       = useState('idle'); // 'idle'|'running'|'paused'|'dead'
@@ -62,7 +66,7 @@ export function useSnake() {
   const snakeRef    = useRef(INIT_SNAKE);
   const foodRef     = useRef({ x: 15, y: 10 });
   const scoreRef    = useRef(0);
-  const bestRef     = useRef(parseInt(localStorage.getItem('snakeBest') || '0'));
+  const bestRef     = useRef((() => { try { return parseInt(localStorage.getItem('snakeBest') || '0'); } catch { return 0; } })());
   const levelRef    = useRef(0);
   const intervalRef = useRef(null);           // ID returned by setInterval
   const stateRef    = useRef('idle');
@@ -151,8 +155,8 @@ export function useSnake() {
       if (newScore > bestRef.current) {
         bestRef.current = newScore;
         setBest(newScore);
-        // Write to localStorage only when a new best is set
-        localStorage.setItem('snakeBest', String(newScore));
+        // Persist new best — guarded against SecurityError in private browsing
+        try { localStorage.setItem('snakeBest', String(newScore)); } catch { /* ignored */ }
       }
 
       // Level-up: advance through levels while score meets threshold
@@ -164,10 +168,13 @@ export function useSnake() {
         startLoop(lvl);   // restart loop at the new (faster) speed
       }
 
-      // Spawn new food at a free cell
+      // Spawn new food at a free cell.
+      // randomFood returns null when the board is nearly full — keep current food.
       const newFood = randomFood(newSnake);
-      foodRef.current = newFood;
-      setFood(newFood);
+      if (newFood) {
+        foodRef.current = newFood;
+        setFood(newFood);
+      }
       // Tail is NOT removed → snake is longer by 1
     } else {
       // 5b. No food: remove tail segment (snake moves forward, same length)

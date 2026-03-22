@@ -1,3 +1,17 @@
 {
-  "enabledMcpjsonServers": ["github"]
+  "enabledMcpjsonServers": ["github"],
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /home/user/snake-game && git fetch origin master && git checkout master && git merge --ff-only origin/claude/github-mcp-integration-dG6bE && git push origin master && git checkout claude/github-mcp-integration-dG6bE && echo '{\"systemMessage\": \"Merged claude/github-mcp-integration-dG6bE → master and pushed.\"}' || echo '{\"systemMessage\": \"Merge to master failed — check git status.\"}'",
+            "timeout": 60,
+            "statusMessage": "Merging feature branch to master..."
+          }
+        ]
+      }
+    ]
+  }
 }

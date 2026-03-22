@@ -111,17 +111,22 @@ export function GameCanvas({ snake, food, levelIndex }) {
 
     // ── Layer 3: snake ────────────────────────────────────────────────────────
     snake.forEach((seg, i) => {
-      // Body opacity fades linearly from 1.0 (head) down to 0.3 (end of tail)
+      // Opacity fades linearly from 1.0 at the head (i=0) down to a floor of
+      // 0.3 at the tail.  Dividing by snake.length means the gradient always
+      // spans the full body regardless of how long the snake has grown.
       const alpha = i === 0 ? 1 : Math.max(0.3, 1 - (i / snake.length) * 0.7);
 
-      // Append 2-digit hex alpha to the 6-digit color string.
-      // "#4ecca3" + "e0" → "#4ecca3e0"  (CSS Color Level 4 8-digit hex, all modern browsers)
+      // Build an 8-digit CSS hex color ("#RRGGBBAA").
+      // toString(16) can produce a single character for values < 16, so
+      // padStart ensures the alpha is always exactly two hex digits.
+      // "#4ecca3" + "e0" → "#4ecca3e0"  (CSS Color Level 4, all modern browsers)
       const hex = Math.round(alpha * 255).toString(16).padStart(2, '0');
       ctx.fillStyle   = i === 0 ? color : `${color}${hex}`;
-      ctx.shadowColor = i === 0 ? color : 'transparent';
+      ctx.shadowColor = i === 0 ? color : 'transparent'; // glow only on head
       ctx.shadowBlur  = i === 0 ? 10 : 0;
 
-      const pad = i === 0 ? 1 : 2;  // head slightly larger than body segments
+      // Head gets 1px padding (larger rect) so it's visually distinct from body
+      const pad = i === 0 ? 1 : 2;
       ctx.beginPath();
       ctx.roundRect(
         seg.x * CELL + pad,

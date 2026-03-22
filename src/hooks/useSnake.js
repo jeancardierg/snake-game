@@ -117,11 +117,14 @@ export function useSnake() {
    *  6. Sync ref + React state.
    */
   const tick = useCallback(() => {
-    // 1. Dequeue next direction, validating against current direction
+    // 1. Dequeue next direction, validating against current direction.
+    //    We shift() rather than access index 0 to consume the entry in one step,
+    //    keeping the queue compact even under rapid input.
     if (dirQueueRef.current.length > 0) {
       const next = dirQueueRef.current.shift();
       const cur  = dirRef.current;
-      // Reject if it would reverse 180° (e.g. moving right, trying to go left)
+      // Reject 180° reversals: moving right (x=1) cannot flip to left (x=-1).
+      // The condition checks both axes so diagonal vectors never slip through.
       if (!(next.x === -cur.x && next.y === -cur.y)) {
         dirRef.current = next;
       }
@@ -159,13 +162,14 @@ export function useSnake() {
         try { localStorage.setItem('snakeBest', String(newScore)); } catch { /* ignored */ }
       }
 
-      // Level-up: advance through levels while score meets threshold
+        // Level-up: a while loop (not if) handles the theoretical case where one
+      // food item jumps the score past multiple thresholds at once.
       let lvl = levelRef.current;
       while (lvl < LEVELS.length - 1 && newScore >= LEVELS[lvl].scoreNext) lvl++;
       if (lvl !== levelRef.current) {
         levelRef.current = lvl;
         setLevel(lvl);
-        startLoop(lvl);   // restart loop at the new (faster) speed
+        startLoop(lvl);   // restart loop at the new (faster) speed immediately
       }
 
       // Spawn new food at a free cell.
@@ -206,14 +210,20 @@ export function useSnake() {
    * - Transitions idle → running on first input.
    */
   const applyDir = useCallback((newDir) => {
-    // Compare against last queued direction so we don't reject valid moves
+    // Validate against the *last queued* direction (not dirRef) so that rapid
+    // multi-step inputs are all checked in sequence.  Example: if the snake is
+    // moving right and the player queues UP then DOWN in quick succession, the
+    // DOWN must be rejected relative to UP, not relative to the snake's current
+    // RIGHT direction (which would incorrectly accept it).
     const last = dirQueueRef.current.length > 0
       ? dirQueueRef.current[dirQueueRef.current.length - 1]
       : dirRef.current;
 
-    if (newDir.x === -last.x && newDir.y === -last.y) return; // 180° flip
-    if (newDir.x === last.x  && newDir.y === last.y)  return; // duplicate
+    if (newDir.x === -last.x && newDir.y === -last.y) return; // 180° flip — illegal
+    if (newDir.x === last.x  && newDir.y === last.y)  return; // duplicate — no-op
 
+    // Cap at 2 so the player can't pre-buffer more than one turn ahead.
+    // This keeps controls responsive; older inputs aren't replaced, just ignored.
     if (dirQueueRef.current.length < 2) {
       dirQueueRef.current.push(newDir);
     }

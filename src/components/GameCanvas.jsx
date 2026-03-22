@@ -39,9 +39,17 @@ const HEAD_GLOW   = 10;                          // halo size around head
 const HEAD_TOTAL  = HEAD_RADIUS + HEAD_GLOW;     // 19
 
 // ─── Offscreen floor cache ────────────────────────────────────────────────────
-// Built once (per dpr) — contains the dark tile floor with ambient light.
+// Renders an Iranian desert landscape: Alborz mountain silhouette across the
+// top rows, arid sand plains in the middle, cracked salt-flat kavir at the
+// bottom, with per-cell terrain texture and earth-tone fissure grid lines.
 let gridCache    = null;
 let gridCacheDpr = 0;
+
+// Seeded deterministic pseudo-random so the terrain is stable across redraws.
+function seededRand(seed) {
+  let s = seed;
+  return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+}
 
 function getGridCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -54,32 +62,138 @@ function getGridCanvas() {
   if (!ctx) return null;
   ctx.scale(dpr, dpr);
 
-  // ── Dark base ──────────────────────────────────────────────────────────────
-  ctx.fillStyle = '#0a0a0f';
-  ctx.fillRect(0, 0, SIZE, SIZE);
+  const rand = seededRand(0xdeadbeef);
 
-  // ── Diagonal ambient light ─────────────────────────────────────────────────
-  const ambient = ctx.createLinearGradient(0, 0, SIZE, SIZE);
-  ambient.addColorStop(0,    'rgba(255,255,255,0.055)');
-  ambient.addColorStop(0.45, 'rgba(0,0,0,0)');
-  ambient.addColorStop(1,    'rgba(0,0,0,0.10)');
-  ctx.fillStyle = ambient;
-  ctx.fillRect(0, 0, SIZE, SIZE);
+  // ── Sky band (top ~20% of grid) ─────────────────────────────────────────────
+  // Hazy midday sky — typical of Iranian high-altitude plateau haze.
+  const skyH = SIZE * 0.22;
+  const sky  = ctx.createLinearGradient(0, 0, 0, skyH);
+  sky.addColorStop(0,   '#c8dff5');  // pale blue zenith
+  sky.addColorStop(0.5, '#d9e8f0');  // horizon haze
+  sky.addColorStop(1,   '#e8d9b8');  // warm dust at mountain base
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, SIZE, skyH);
 
-  // ── Tile highlight edges (top & left of each cell — catch the light) ───────
-  ctx.strokeStyle = 'rgba(255,255,255,0.09)';
-  ctx.lineWidth   = 0.5;
+  // ── Desert floor (below sky) ──────────────────────────────────────────────
+  // Gradient from warm sandy ochre near the mountains to pale salt-flat at bottom.
+  const desert = ctx.createLinearGradient(0, skyH, 0, SIZE);
+  desert.addColorStop(0,    '#c8a45a');  // golden sand
+  desert.addColorStop(0.40, '#d4ac62');  // bright mid-desert
+  desert.addColorStop(0.75, '#c8b87a');  // fading to salt flat
+  desert.addColorStop(1,    '#ddd4b0');  // pale kavir salt flat
+  ctx.fillStyle = desert;
+  ctx.fillRect(0, skyH, SIZE, SIZE - skyH);
+
+  // ── Subtle terrain variation per cell ────────────────────────────────────────
+  // Each cell gets a slight sand-tone tint to break up the monotony.
+  for (let row = 0; row < ROWS; row++) {
+    const fy = row / ROWS;
+    for (let col = 0; col < COLS; col++) {
+      const r = rand();
+      if (fy < 0.22) continue;  // skip sky cells
+      // Vary between darker rocky ground and brighter sand patches
+      const bright = (r - 0.5) * 28;
+      const base   = fy > 0.75 ? [210, 205, 175] : [205, 170, 90];
+      ctx.fillStyle = `rgba(${base[0]+bright},${base[1]+bright*0.8},${base[2]+bright*0.6},0.28)`;
+      ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
+    }
+  }
+
+  // ── Alborz mountain silhouette (rows 1–4) ────────────────────────────────────
+  // Three overlapping ridgelines in receding blue-grey tones.
+  const ridges = [
+    { yBase: skyH * 1.05, amp: 38, freq: 0.018, color: '#7a8fa0', alpha: 0.82 },  // far ridge
+    { yBase: skyH * 0.88, amp: 28, freq: 0.024, color: '#91a3b5', alpha: 0.70 },  // mid ridge
+    { yBase: skyH * 0.72, amp: 20, freq: 0.032, color: '#a8bbc9', alpha: 0.55 },  // near ridge
+  ];
+
+  for (const ridge of ridges) {
+    ctx.save();
+    ctx.globalAlpha = ridge.alpha;
+    ctx.fillStyle   = ridge.color;
+    ctx.beginPath();
+    ctx.moveTo(0, SIZE);
+    for (let x = 0; x <= SIZE; x += 2) {
+      // Stack three sine harmonics for natural-looking peaks
+      const y = ridge.yBase
+        - Math.sin(x * ridge.freq + 0.8)         * ridge.amp
+        - Math.sin(x * ridge.freq * 2.3 + 2.1)   * ridge.amp * 0.42
+        - Math.sin(x * ridge.freq * 0.57 + 1.3)  * ridge.amp * 0.28;
+      if (x === 0) ctx.moveTo(0, y); else ctx.lineTo(x, y);
+    }
+    ctx.lineTo(SIZE, SIZE);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Snow caps on highest peaks ────────────────────────────────────────────
+  // Damavand-style white tips on the tallest mountain spires.
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle   = '#f0f4f8';
+  // Draw small white triangles at approximate peak locations
+  for (const px of [60, 155, 265, 350]) {
+    const peakY = ridges[2].yBase
+      - Math.sin(px * 0.032 + 0.8)       * ridges[2].amp
+      - Math.sin(px * 0.074 + 2.1)       * ridges[2].amp * 0.42
+      - Math.sin(px * 0.018 + 1.3)       * ridges[2].amp * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(px,      peakY);
+    ctx.lineTo(px - 7,  peakY + 10);
+    ctx.lineTo(px + 7,  peakY + 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // ── Kavir (salt-flat) crackle in the bottom third ────────────────────────
+  // Random polygonal crack lines mimicking the dried salt-lake surface.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(160,140,100,0.38)';
+  ctx.lineWidth   = 0.6;
+  const kavirTop = SIZE * 0.70;
+  for (let k = 0; k < 55; k++) {
+    const x1 = rand() * SIZE;
+    const y1 = kavirTop + rand() * (SIZE - kavirTop);
+    const len = 8 + rand() * 20;
+    const ang = rand() * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 + Math.cos(ang) * len, y1 + Math.sin(ang) * len);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // ── Distant road / qanat line ────────────────────────────────────────────
+  // A faint diagonal line suggesting the ancient qanat irrigation channels
+  // visible in aerial views of the Iranian plateau.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(140,115,70,0.28)';
+  ctx.lineWidth   = 1.2;
+  ctx.setLineDash([4, 8]);
   ctx.beginPath();
-  for (let i = 0; i <= COLS; i++) { ctx.moveTo(i * CELL, 0);    ctx.lineTo(i * CELL, SIZE); }
-  for (let j = 0; j <= ROWS; j++) { ctx.moveTo(0, j * CELL);    ctx.lineTo(SIZE, j * CELL); }
+  ctx.moveTo(SIZE * 0.10, SIZE * 0.48);
+  ctx.lineTo(SIZE * 0.72, SIZE * 0.92);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── Grid fissures (earth-tone cell borders) ───────────────────────────────
+  // Replace white/black grid lines with warm cracked-earth tones.
+  ctx.strokeStyle = 'rgba(120,85,40,0.22)';
+  ctx.lineWidth   = 0.6;
+  ctx.beginPath();
+  for (let i = 0; i <= COLS; i++) { ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, SIZE); }
+  for (let j = 0; j <= ROWS; j++) { ctx.moveTo(0, j * CELL); ctx.lineTo(SIZE, j * CELL); }
   ctx.stroke();
 
-  // ── Tile shadow edges (bottom & right of each cell — in shade) ─────────────
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth   = 0.5;
+  // Lighter highlight edge (sun catching the raised rim of each cell)
+  ctx.strokeStyle = 'rgba(255,220,160,0.14)';
+  ctx.lineWidth   = 0.4;
   ctx.beginPath();
-  for (let i = 1; i <= COLS; i++) { ctx.moveTo(i * CELL - 0.5, 0); ctx.lineTo(i * CELL - 0.5, SIZE); }
-  for (let j = 1; j <= ROWS; j++) { ctx.moveTo(0, j * CELL - 0.5); ctx.lineTo(SIZE, j * CELL - 0.5); }
+  for (let i = 1; i <= COLS; i++) { ctx.moveTo(i * CELL - 0.4, 0); ctx.lineTo(i * CELL - 0.4, SIZE); }
+  for (let j = 1; j <= ROWS; j++) { ctx.moveTo(0, j * CELL - 0.4); ctx.lineTo(SIZE, j * CELL - 0.4); }
   ctx.stroke();
 
   gridCacheDpr = dpr;

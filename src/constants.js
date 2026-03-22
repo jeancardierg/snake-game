@@ -18,6 +18,13 @@ export const LEVELS = [
   // color  = snake body color + UI accent for that level
 ];
 
+// ─── Input constants ──────────────────────────────────────────────────────────
+// Minimum pixel travel for a touch to register as a directional swipe.
+export const SWIPE_THRESHOLD = 20;
+// Maximum number of buffered direction changes before new inputs are dropped.
+// Keeps the queue bounded; two buffered turns is enough for any legitimate play.
+export const DIR_QUEUE_MAX = 2;
+
 // ─── Direction vectors ────────────────────────────────────────────────────────
 // Convenience constants; not used by the core loop (which stores {x,y} inline)
 // but available for tests, extensions, or clarity.

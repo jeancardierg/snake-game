@@ -15,7 +15,9 @@
 import { LEVELS } from '../constants';
 
 export function Scoreboard({ score, best, levelIndex }) {
-  const level = LEVELS[levelIndex] ?? LEVELS[LEVELS.length - 1];
+  // Clamp explicitly (mirrors LevelBar) rather than relying on nullish coalesce.
+  const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
+  const level = LEVELS[safeIdx];
   return (
     <div className="scoreboard">
       <div className="score-block">

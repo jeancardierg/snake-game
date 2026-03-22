@@ -773,13 +773,25 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex }) {
   // rAF loop runs for the component's lifetime; all game data is read from refs.
   useEffect(() => {
     let rafId;
+    let stopped = false;
     const loop = () => {
+      if (stopped) return;  // guard: stop scheduling after unmount or fatal error
       const canvas = canvasRef.current;
-      if (canvas) drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef);
+      if (canvas) {
+        try {
+          drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef);
+        } catch (err) {
+          // ErrorBoundary will catch and display the error; stop the loop so it
+          // doesn't keep firing against a potentially dead canvas.
+          console.error('[GameCanvas] drawFrame threw — stopping rAF loop:', err);
+          stopped = true;
+          return;
+        }
+      }
       rafId = requestAnimationFrame(loop);
     };
     rafId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafId);
+    return () => { stopped = true; cancelAnimationFrame(rafId); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

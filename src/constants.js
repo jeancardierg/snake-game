@@ -1,8 +1,8 @@
 // ─── Grid dimensions ──────────────────────────────────────────────────────────
 // The board is a COLS × ROWS grid. Each cell is CELL logical pixels square.
 // Changing COLS/ROWS resizes the board; changing CELL resizes the visual size.
-export const COLS = 20;          // number of columns
-export const ROWS = 20;          // number of rows
+export const COLS = 10;          // number of columns
+export const ROWS = 10;          // number of rows
 export const CELL = 20;          // pixels per cell (logical, before devicePixelRatio)
 
 // ─── Level definitions ────────────────────────────────────────────────────────

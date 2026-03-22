@@ -29,7 +29,7 @@ import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX } from '../constants';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
-const INIT_SNAKE = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
 const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 
 // Seed the pool with the initial snake on module load.
@@ -105,7 +105,7 @@ export function useSnake() {
   const headIdxRef  = useRef(0);                // index of head segment in segPool
   const snakeLenRef = useRef(INIT_SNAKE.length);// live segment count
 
-  const foodRef     = useRef({ x: 15, y: 10 });
+  const foodRef     = useRef({ x: 7, y: 5 });
   const scoreRef    = useRef(0);
   const bestRef     = useRef(best);
   const levelRef    = useRef(0);
@@ -285,18 +285,17 @@ export function useSnake() {
 
   const reset = useCallback(() => {
     stopLoop();
-    const initSegs = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
-    headIdxRef.current  = initPool(initSegs);   // returns 0; fills pool
-    snakeLenRef.current = initSegs.length;
+    headIdxRef.current  = initPool(INIT_SNAKE);   // returns 0; fills pool
+    snakeLenRef.current = INIT_SNAKE.length;
     dirRef.current      = { x: 1, y: 0 };
     dirQueueRef.current = [];
-    // randomFood on a 3-segment snake has 397 free cells — null is impossible here.
+    // randomFood on a 3-segment snake has 97 free cells on a 10×10 grid — null is impossible here.
     // Fallback picks the first free cell deterministically rather than a hardcoded
     // coordinate that could coincide with the snake if INIT_SNAKE ever changes.
     const initFood = randomFood(headIdxRef.current, snakeLenRef.current);
     if (!initFood) {
       // Should never happen; guard against future INIT_SNAKE changes.
-      const occupied = new Set(initSegs.map(s => `${s.x},${s.y}`));
+      const occupied = new Set(INIT_SNAKE.map(s => `${s.x},${s.y}`));
       for (let x = 0; x < COLS; x++) {
         for (let y = 0; y < ROWS; y++) {
           if (!occupied.has(`${x},${y}`)) { foodRef.current = { x, y }; break; }

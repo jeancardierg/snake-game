@@ -113,16 +113,16 @@ describe('state machine', () => {
 
   it('running → dead on wall collision', () => {
     const { result } = renderHook(() => useSnake());
-    // Move up; snake starts at y=10, wall is y<0, so 11 ticks hits it
+    // Move up; snake starts at y=5, wall is y<0, so 6 ticks hits it
     act(() => result.current.applyDir(DIR.UP));
-    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 12); });
+    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 8); });
     expect(result.current.state).toBe('dead');
   });
 
   it('reset returns to idle with score 0 and level 0', () => {
     const { result } = renderHook(() => useSnake());
     act(() => result.current.applyDir(DIR.UP));
-    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 12); });
+    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 8); });
     act(() => result.current.reset());
     expect(result.current.state).toBe('idle');
     expect(result.current.score).toBe(0);
@@ -132,7 +132,7 @@ describe('state machine', () => {
   it('applyDir is ignored when state is dead', () => {
     const { result } = renderHook(() => useSnake());
     act(() => result.current.applyDir(DIR.UP));
-    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 12); });
+    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 8); });
     expect(result.current.state).toBe('dead');
     act(() => result.current.applyDir(DIR.RIGHT));
     expect(result.current.state).toBe('dead');

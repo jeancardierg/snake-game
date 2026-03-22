@@ -240,19 +240,19 @@ function buildGlowSprite(color, radius, glowSize) {
   return off;
 }
 
-// ─── Segment sprite caches (King Cobra) ──────────────────────────────────────
+// ─── Segment sprite caches (Missile + Smoke trail) ───────────────────────────
 const segSpriteCache = new Map();
 
-// Body: (CELL+4)×(CELL+4) smooth circle — 2px padding so adjacent circles
-// overlap by 2px each side, hiding the grid seams.
-function buildCobraBodySprite() {
+// Body: (CELL+4)×(CELL+4) soft smoke puff — 2px padding so adjacent puffs
+// overlap by 2px each side, blending into a continuous trail.
+function buildSmokePuffSprite() {
   const dpr = window.devicePixelRatio || 1;
-  const key = `cobra:b:${dpr}`;
+  const key = `smoke:${dpr}`;
   if (segSpriteCache.has(key)) return segSpriteCache.get(key);
 
   const W  = CELL + 4;   // 24 logical px
-  const CR = W / 2;      // 12 — canvas centre = circle centre
-  const r  = CELL / 2 + 0.8;   // radius slightly > half-cell for overlap
+  const CR = W / 2;      // 12
+  const r  = CELL / 2 + 0.8;
 
   const off = document.createElement('canvas');
   off.width  = W * dpr;
@@ -261,56 +261,41 @@ function buildCobraBodySprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // 3D-lit olive body
-  const bodyGrad = cx.createRadialGradient(CR - r * 0.22, CR - r * 0.30, 0, CR, CR, r);
-  bodyGrad.addColorStop(0,    '#3c4a20');   // top-lit highlight
-  bodyGrad.addColorStop(0.45, '#202a10');   // mid body
-  bodyGrad.addColorStop(1,    '#0c1006');   // deep rim shadow
-  cx.fillStyle = bodyGrad;
+  // Soft grey-white smoke puff
+  const puff = cx.createRadialGradient(CR, CR, 0, CR, CR, r);
+  puff.addColorStop(0,    'rgba(210,212,220,0.82)');
+  puff.addColorStop(0.40, 'rgba(170,173,185,0.55)');
+  puff.addColorStop(0.75, 'rgba(130,133,145,0.28)');
+  puff.addColorStop(1,    'rgba(100,103,115,0)');
+  cx.fillStyle = puff;
   cx.beginPath();
   cx.arc(CR, CR, r, 0, Math.PI * 2);
   cx.fill();
 
-  // Cream inter-band stripe (clipped to circle)
-  cx.save();
+  // Bright inner core (fresh smoke near the nozzle)
+  const core = cx.createRadialGradient(CR - 1.5, CR - 1.5, 0, CR, CR, r * 0.42);
+  core.addColorStop(0, 'rgba(245,246,252,0.42)');
+  core.addColorStop(1, 'rgba(0,0,0,0)');
+  cx.fillStyle = core;
   cx.beginPath();
-  cx.arc(CR, CR, r, 0, Math.PI * 2);
-  cx.clip();
-  const bandGrad = cx.createLinearGradient(0, CR - 3.2, 0, CR + 3.2);
-  bandGrad.addColorStop(0,   'rgba(55,48,14,0.65)');
-  bandGrad.addColorStop(0.2, 'rgba(210,185,108,0.75)');
-  bandGrad.addColorStop(0.8, 'rgba(210,185,108,0.75)');
-  bandGrad.addColorStop(1,   'rgba(55,48,14,0.65)');
-  cx.fillStyle = bandGrad;
-  cx.fillRect(0, CR - 3.2, W, 6.4);
-  cx.restore();
-
-  // Soft top-lit sheen
-  cx.save();
-  cx.beginPath();
-  cx.arc(CR, CR, r, 0, Math.PI * 2);
-  cx.clip();
-  const sheen = cx.createRadialGradient(CR - r * 0.22, CR - r * 0.30, 0, CR, CR, r * 0.80);
-  sheen.addColorStop(0, 'rgba(175,205,125,0.18)');
-  sheen.addColorStop(1, 'rgba(0,0,0,0)');
-  cx.fillStyle = sheen;
-  cx.fillRect(0, 0, W, W);
-  cx.restore();
+  cx.arc(CR, CR, r * 0.5, 0, Math.PI * 2);
+  cx.fill();
 
   if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
   segSpriteCache.set(key, off);
   return off;
 }
 
-// Head: CELL×CELL, designed with snout at y=0 (pointing UP).
+// Missile head: CELL×CELL, designed pointing UP (nose tip at y=0).
 // drawFrame rotates it to face the direction of movement.
-function buildCobraHeadSprite() {
+function buildMissileHeadSprite() {
   const dpr = window.devicePixelRatio || 1;
-  const key = `cobra:h:${dpr}`;
+  const key = `missile:h:${dpr}`;
   if (segSpriteCache.has(key)) return segSpriteCache.get(key);
 
-  const C  = CELL;     // 20
-  const HC = C / 2;    // 10
+  const C  = CELL;   // 20
+  const HC = C / 2;  // 10
+  const BW = 3.5;    // body half-width
 
   const off = document.createElement('canvas');
   off.width  = C * dpr;
@@ -319,122 +304,107 @@ function buildCobraHeadSprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // ── Hood / neck (lower ~60% of sprite — behind the eyes) ─────────────────
-  // Wide oval hood characteristic of a rearing King Cobra.
-  const hoodGrad = cx.createRadialGradient(HC, C * 0.62, 0, HC, C * 0.62, HC * 0.95);
-  hoodGrad.addColorStop(0,   '#3c4c20');
-  hoodGrad.addColorStop(0.5, '#283218');
-  hoodGrad.addColorStop(1,   '#151c0a');
-  cx.fillStyle = hoodGrad;
+  // ── Delta fins (drawn first — behind body) ────────────────────────────────
+  cx.fillStyle = '#7080a0';
+  // Left fin
   cx.beginPath();
-  cx.ellipse(HC, C * 0.62, HC * 0.96, HC * 0.78, 0, 0, Math.PI * 2);
+  cx.moveTo(HC - BW,     C * 0.66);
+  cx.lineTo(HC - BW - 5, C * 0.90);
+  cx.lineTo(HC - BW,     C * 0.94);
+  cx.closePath();
+  cx.fill();
+  // Right fin
+  cx.beginPath();
+  cx.moveTo(HC + BW,     C * 0.66);
+  cx.lineTo(HC + BW + 5, C * 0.90);
+  cx.lineTo(HC + BW,     C * 0.94);
+  cx.closePath();
+  cx.fill();
+  // Fin edge highlight
+  cx.strokeStyle = 'rgba(180,200,230,0.55)';
+  cx.lineWidth = 0.6;
+  cx.beginPath();
+  cx.moveTo(HC - BW, C * 0.66);
+  cx.lineTo(HC - BW - 5, C * 0.90);
+  cx.stroke();
+  cx.beginPath();
+  cx.moveTo(HC + BW, C * 0.66);
+  cx.lineTo(HC + BW + 5, C * 0.90);
+  cx.stroke();
+
+  // ── Body tube (metallic cylinder) ─────────────────────────────────────────
+  const bodyGrad = cx.createLinearGradient(HC - BW, 0, HC + BW, 0);
+  bodyGrad.addColorStop(0,    '#4a5060');
+  bodyGrad.addColorStop(0.28, '#b8c0d0');
+  bodyGrad.addColorStop(0.48, '#dce4f0');
+  bodyGrad.addColorStop(0.68, '#9098a8');
+  bodyGrad.addColorStop(1,    '#3a4050');
+  cx.fillStyle = bodyGrad;
+  cx.beginPath();
+  cx.rect(HC - BW, C * 0.20, BW * 2, C * 0.74);
   cx.fill();
 
-  // Spectacle marking — the iconic paired-circle pattern on the King Cobra hood
-  cx.strokeStyle = 'rgba(215,190,110,0.82)';
-  cx.lineWidth   = 0.9;
+  // Red warning band
+  cx.save();
   cx.beginPath();
-  cx.arc(HC - 3.8, C * 0.58, 3.0, Math.PI * 0.15, Math.PI * 1.85);
-  cx.stroke();
-  cx.beginPath();
-  cx.arc(HC + 3.8, C * 0.58, 3.0, -Math.PI * 0.85, Math.PI * 0.85);
-  cx.stroke();
-  cx.beginPath();  // bridge between the two oculars
-  cx.moveTo(HC - 1.8, C * 0.57 - 2.6);
-  cx.lineTo(HC + 1.8, C * 0.57 - 2.6);
-  cx.stroke();
+  cx.rect(HC - BW, C * 0.20, BW * 2, C * 0.74);
+  cx.clip();
+  cx.fillStyle = '#cc1818';
+  cx.fillRect(HC - BW, C * 0.48, BW * 2, C * 0.09);
+  // Thin highlight on band
+  cx.fillStyle = 'rgba(255,120,120,0.40)';
+  cx.fillRect(HC - BW, C * 0.48, BW * 2, C * 0.025);
+  cx.restore();
 
-  // Hood rim highlight for 3D depth
-  cx.strokeStyle = 'rgba(75,95,38,0.55)';
-  cx.lineWidth   = 0.65;
-  cx.beginPath();
-  cx.ellipse(HC, C * 0.62, HC * 0.93, HC * 0.74, 0, Math.PI * 1.08, Math.PI * 2.0);
-  cx.stroke();
+  // Body highlight (left-lit sheen stripe)
+  cx.fillStyle = 'rgba(255,255,255,0.18)';
+  cx.fillRect(HC - BW + 0.8, C * 0.20, 1.6, C * 0.74);
 
-  // ── Head / face (pointed oval, snout toward y=0) ──────────────────────────
-  const faceGrad = cx.createRadialGradient(HC, C * 0.30, 0, HC, C * 0.38, HC * 0.68);
-  faceGrad.addColorStop(0,   '#4e5e2a');
-  faceGrad.addColorStop(0.5, '#333f1a');
-  faceGrad.addColorStop(1,   '#1c2410');
-  cx.fillStyle = faceGrad;
+  // ── Nose cone (pointed tip at y=0) ────────────────────────────────────────
+  const noseGrad = cx.createLinearGradient(HC - BW, 0, HC + BW, 0);
+  noseGrad.addColorStop(0,    '#3a4050');
+  noseGrad.addColorStop(0.30, '#a8b2c4');
+  noseGrad.addColorStop(0.48, '#d0daea');
+  noseGrad.addColorStop(0.66, '#8090a2');
+  noseGrad.addColorStop(1,    '#2c3440');
+  cx.fillStyle = noseGrad;
   cx.beginPath();
-  cx.ellipse(HC, C * 0.38, HC * 0.60, HC * 0.52, 0, 0, Math.PI * 2);
+  cx.moveTo(HC, 0);                                        // tip
+  cx.quadraticCurveTo(HC + BW + 1.5, C * 0.13, HC + BW, C * 0.22);
+  cx.lineTo(HC - BW, C * 0.22);
+  cx.quadraticCurveTo(HC - BW - 1.5, C * 0.13, HC, 0);
+  cx.closePath();
+  cx.fill();
+  // Nose specular highlight
+  cx.fillStyle = 'rgba(255,255,255,0.32)';
+  cx.beginPath();
+  cx.moveTo(HC, 1);
+  cx.quadraticCurveTo(HC + 1.8, C * 0.09, HC + BW * 0.55, C * 0.21);
+  cx.lineTo(HC + BW * 0.15, C * 0.21);
+  cx.quadraticCurveTo(HC + 0.5, C * 0.09, HC, 1);
+  cx.closePath();
   cx.fill();
 
-  // ── Eyes — large, detailed, realistic ────────────────────────────────────
-  const eyeY  = C * 0.40;
-  const eyeOX = HC * 0.72;
-  for (const sign of [-1, 1]) {
-    const ex = HC + sign * eyeOX;
-
-    // Dark bony eye socket
-    cx.fillStyle = '#0a0d05';
-    cx.beginPath();
-    cx.ellipse(ex, eyeY, 3.0, 2.4, 0, 0, Math.PI * 2);
-    cx.fill();
-
-    // Amber-gold iris with radial gradient (bright inner, dark outer limbus)
-    const iris = cx.createRadialGradient(ex - sign * 0.4, eyeY - 0.4, 0, ex, eyeY, 2.4);
-    iris.addColorStop(0,   '#ffe040');
-    iris.addColorStop(0.4, '#cc8800');
-    iris.addColorStop(1,   '#5c2e00');
-    cx.fillStyle = iris;
-    cx.beginPath();
-    cx.ellipse(ex, eyeY, 2.4, 1.9, 0, 0, Math.PI * 2);
-    cx.fill();
-
-    // Vertical slit pupil
-    cx.fillStyle = '#050302';
-    cx.beginPath();
-    cx.ellipse(ex, eyeY, 0.58, 1.65, 0, 0, Math.PI * 2);
-    cx.fill();
-
-    // Primary corneal highlight (bright, tight)
-    cx.fillStyle = 'rgba(255,248,205,0.85)';
-    cx.beginPath();
-    cx.ellipse(ex - sign * 0.65, eyeY - 0.70, 0.65, 0.40, -0.4, 0, Math.PI * 2);
-    cx.fill();
-
-    // Secondary diffuse reflection
-    cx.fillStyle = 'rgba(255,240,180,0.28)';
-    cx.beginPath();
-    cx.ellipse(ex + sign * 0.35, eyeY + 0.55, 0.32, 0.22, 0.3, 0, Math.PI * 2);
-    cx.fill();
-  }
-
-  // ── Nostrils ──────────────────────────────────────────────────────────────
-  cx.fillStyle = 'rgba(0,0,0,0.55)';
-  for (const nx of [HC - 1.6, HC + 1.6]) {
-    cx.beginPath();
-    cx.ellipse(nx, C * 0.20, 0.75, 0.52, 0.3, 0, Math.PI * 2);
-    cx.fill();
-  }
-
-  // Snout scale highlight
-  cx.fillStyle = 'rgba(110,140,65,0.28)';
+  // ── Nozzle ring ───────────────────────────────────────────────────────────
+  cx.fillStyle = '#1e2228';
   cx.beginPath();
-  cx.ellipse(HC, C * 0.10, 2.6, 1.9, 0, 0, Math.PI * 2);
+  cx.ellipse(HC, C * 0.93, BW + 1, 2.2, 0, 0, Math.PI * 2);
+  cx.fill();
+  cx.fillStyle = '#34383e';
+  cx.beginPath();
+  cx.ellipse(HC, C * 0.93, BW - 0.5, 1.4, 0, 0, Math.PI * 2);
   cx.fill();
 
-  // ── Forked tongue (extends from snout toward y<0, clipped at edge) ───────
-  cx.strokeStyle = '#dd1010';
-  cx.lineWidth   = 0.80;
-  cx.lineCap     = 'round';
-  // Stem
+  // ── Exhaust glow (orange-white hot centre) ────────────────────────────────
+  const exhaust = cx.createRadialGradient(HC, C * 0.95, 0, HC, C * 0.95, 4.5);
+  exhaust.addColorStop(0,   'rgba(255,230,140,0.95)');
+  exhaust.addColorStop(0.35,'rgba(255,110,20,0.70)');
+  exhaust.addColorStop(0.70,'rgba(200,40,10,0.35)');
+  exhaust.addColorStop(1,   'rgba(150,20,5,0)');
+  cx.fillStyle = exhaust;
   cx.beginPath();
-  cx.moveTo(HC, C * 0.04);
-  cx.lineTo(HC, -1);
-  cx.stroke();
-  // Left fork
-  cx.beginPath();
-  cx.moveTo(HC, C * 0.04);
-  cx.lineTo(HC - 2.8, -2.5);
-  cx.stroke();
-  // Right fork
-  cx.beginPath();
-  cx.moveTo(HC, C * 0.04);
-  cx.lineTo(HC + 2.8, -2.5);
-  cx.stroke();
+  cx.ellipse(HC, C * 0.95, 4.5, 3.5, 0, 0, Math.PI * 2);
+  cx.fill();
 
   if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
   segSpriteCache.set(key, off);
@@ -736,25 +706,25 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
     ctx.drawImage(foodSpr, food.x * CELL, food.y * CELL, CELL, CELL);
   }
 
-  // ── Layer 3: snake body (tail → neck, drawn back-to-front) ───────────────
-  const bodySprite = buildCobraBodySprite();
-  const BW = CELL + 4;  // body sprite logical size (oversized for overlap)
+  // ── Layer 3: smoke trail (tail → neck, drawn back-to-front) ─────────────
+  const smokeSprite = buildSmokePuffSprite();
+  const SW = CELL + 4;  // smoke sprite logical size (oversized for overlap/blending)
   for (let i = snakeLen - 1; i >= 1; i--) {
     const seg   = segPool[(headIdx + i) % POOL_SIZE];
-    const alpha = Math.max(0.28, 1 - (i / snakeLen) * 0.72);
+    const alpha = Math.max(0.15, 1 - (i / snakeLen) * 0.88);
     ctx.globalAlpha = alpha;
-    if (bodySprite) ctx.drawImage(bodySprite, seg.x * CELL - 2, seg.y * CELL - 2, BW, BW);
+    if (smokeSprite) ctx.drawImage(smokeSprite, seg.x * CELL - 2, seg.y * CELL - 2, SW, SW);
   }
   ctx.globalAlpha = 1;
 
-  // ── Layer 4: head glow + rotated head sprite ──────────────────────────────
+  // ── Layer 4: exhaust glow + rotated missile sprite ────────────────────────
   const hcx = hxF * CELL + CELL / 2;
   const hcy = hyF * CELL + CELL / 2;
 
-  // Amber glow halo
-  const headGlow = buildGlowSprite('#ffaa00', HEAD_RADIUS, HEAD_GLOW);
+  // Orange-red exhaust glow behind the nozzle
+  const headGlow = buildGlowSprite('#ff6010', HEAD_RADIUS, HEAD_GLOW);
   if (headGlow) {
-    ctx.globalAlpha = 0.70;
+    ctx.globalAlpha = 0.60;
     ctx.drawImage(headGlow, hcx - HEAD_TOTAL, hcy - HEAD_TOTAL, HEAD_TOTAL * 2, HEAD_TOTAL * 2);
     ctx.globalAlpha = 1;
   }
@@ -769,12 +739,12 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
     dirY = Math.abs(ry) > 1 ? -Math.sign(ry) : ry;
   }
 
-  // Sprite is designed pointing UP (snout at y=0).
+  // Sprite is designed pointing UP (nose tip at y=0).
   // atan2(dy,dx): right=0, down=π/2, left=±π, up=-π/2.
   // Adding π/2 maps "right" → 90° CW, which rotates the up-sprite to point right. ✓
   const angle = Math.atan2(dirY, dirX) + Math.PI / 2;
 
-  const headSprite = buildCobraHeadSprite();
+  const headSprite = buildMissileHeadSprite();
   if (headSprite) {
     ctx.save();
     ctx.translate(hcx, hcy);

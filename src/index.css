@@ -23,9 +23,16 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding: 16px;
+  padding: 16px 0;
   width: 100%;
-  max-width: 420px;
+  max-width: 100%;
+}
+
+@media (min-width: 900px) {
+  .app {
+    padding: 16px;
+    max-width: 420px;
+  }
 }
 
 /* ── Scoreboard ── */
@@ -172,22 +179,29 @@ body {
   outline-offset: 2px;
 }
 
-/* ── D-Pad ── */
+/* ── D-Pad — overlaid on canvas, bottom-center, semitransparent ── */
 .dpad {
-  position: relative;
-  width: 132px;
-  height: 132px;
-  margin-top: 4px;
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 192px;
+  height: 192px;
+  opacity: 0.35;
+  transition: opacity 0.2s;
+  pointer-events: auto;
 }
+.dpad:active { opacity: 0.7; }
+
 .dpad-btn {
   position: absolute;
-  width: 44px;
-  height: 44px;
+  width: 64px;
+  height: 64px;
   background: #1a1a2e;
   border: 1px solid #2e2e4e;
-  border-radius: 6px;
-  color: #ccc; /* was #aaa — bumped for contrast */
-  font-size: 18px;
+  border-radius: 8px;
+  color: #ccc;
+  font-size: 22px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -196,16 +210,16 @@ body {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.dpad-btn:active { background: #2e2e4e; color: #fff; }
+.dpad-btn:active { background: #2e2e4e; color: #fff; opacity: 1; }
 .dpad-btn:focus-visible {
   outline: 2px solid #4ecca3;
   outline-offset: 2px;
 }
 
-.dpad-up    { top: 0;    left: 44px; }
-.dpad-left  { top: 44px; left: 0;    }
-.dpad-down  { top: 88px; left: 44px; }
-.dpad-right { top: 44px; left: 88px; }
+.dpad-up    { top: 0;     left: 64px; }
+.dpad-left  { top: 64px;  left: 0;    }
+.dpad-down  { top: 128px; left: 64px; }
+.dpad-right { top: 64px;  left: 128px; }
 
 /* ── Hide D-pad on large screens with keyboard ── */
 @media (min-width: 900px) {

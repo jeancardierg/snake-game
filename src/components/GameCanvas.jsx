@@ -33,7 +33,7 @@ const SIZE = COLS * CELL;  // 400 × 400 logical pixels at default settings
 const FOOD_RADIUS = CELL / 2 - 2;               // 8  — food circle radius
 const FOOD_GLOW   = 14;                          // halo size around food
 const FOOD_TOTAL  = FOOD_RADIUS + FOOD_GLOW;     // 22
-const FOOD_PAD    = 8;                           // portrait overhang — gives room for suit below face
+const FOOD_PAD    = 5;                           // portrait sprite padding (sprite = CELL + 2*PAD = 30px)
 const HEAD_RADIUS = CELL / 2 - 1;               // 9  — head glow inner radius
 const HEAD_GLOW   = 10;                          // halo size around head
 const HEAD_TOTAL  = HEAD_RADIUS + HEAD_GLOW;     // 19
@@ -437,9 +437,9 @@ function buildCobraHeadSprite() {
   return off;
 }
 
-// ─── Food sprite cache (Trump portrait — head to armpit) ──────────────────────
-// 36×36 px canvas (CELL=20 + FOOD_PAD*2=16) showing hair, face, neck,
-// navy suit shoulders, white shirt and red tie.
+// ─── Food sprite cache (Trump portrait — flat cartoon icon style) ─────────────
+// 30×30 px canvas (CELL=20 + FOOD_PAD*2=10). Peach skin, amber hair,
+// dark steel-blue suit, bold outline — matches compact avatar icon aesthetic.
 const foodSpriteCache = new Map();
 
 function buildTrumpSprite() {
@@ -447,10 +447,10 @@ function buildTrumpSprite() {
   const key = `trump:${dpr}`;
   if (foodSpriteCache.has(key)) return foodSpriteCache.get(key);
 
-  const S  = CELL + FOOD_PAD * 2;   // 36 logical px
-  const CX = S / 2;                 // 18 — horizontal centre
-  const CY = 14;                    // face centre (upper half of canvas)
-  const R  = 8;                     // face radius
+  const S  = CELL + FOOD_PAD * 2;   // 30 logical px
+  const CX = S / 2;                 // 15 — horizontal centre
+  const CY = 11;                    // face centre
+  const R  = 7;                     // face radius
 
   const off = document.createElement('canvas');
   off.width  = S * dpr;
@@ -459,230 +459,176 @@ function buildTrumpSprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // ── Drop shadow (behind the whole portrait) ───────────────────────────────
-  const shadow = cx.createRadialGradient(CX + 1, CY + 2, 0, CX + 1, CY + 3, R + 6);
-  shadow.addColorStop(0, 'rgba(0,0,0,0.40)');
-  shadow.addColorStop(1, 'rgba(0,0,0,0)');
-  cx.fillStyle = shadow;
-  cx.fillRect(0, 0, S, S);
-
-  // ══ SUIT (drawn first — everything else overlays it) ═════════════════════
-
-  // ── Jacket body — wide navy trapezoid filling lower portion ──────────────
-  cx.fillStyle = '#1c3472';
+  // ── 1. Dark outline blob (drawn behind everything) ────────────────────────
+  cx.fillStyle = 'rgba(28,22,16,0.88)';
+  // Head outline
   cx.beginPath();
-  cx.moveTo(0,       S);         // bottom-left corner
-  cx.lineTo(S,       S);         // bottom-right corner
-  cx.lineTo(S,       CY + 10);   // right armpit
-  cx.lineTo(CX + 12, CY + 6);    // right shoulder slope
-  cx.lineTo(CX + 6,  CY + 3);    // right collar
-  cx.lineTo(CX - 6,  CY + 3);    // left collar
-  cx.lineTo(CX - 12, CY + 6);    // left shoulder slope
-  cx.lineTo(0,       CY + 10);   // left armpit
+  cx.ellipse(CX, CY, R + 2, R + 1.5, 0, 0, Math.PI * 2);
+  cx.fill();
+  // Suit outline
+  cx.beginPath();
+  cx.moveTo(CX - R - 3, S + 1);
+  cx.lineTo(CX + R + 3, S + 1);
+  cx.lineTo(CX + R + 3, CY + R - 2);
+  cx.lineTo(CX - R - 3, CY + R - 2);
   cx.closePath();
   cx.fill();
 
-  // Jacket side shadow (darker edges for 3D depth)
-  const jacketShade = cx.createLinearGradient(0, 0, S, 0);
-  jacketShade.addColorStop(0,    'rgba(10,18,50,0.55)');
-  jacketShade.addColorStop(0.25, 'rgba(0,0,0,0)');
-  jacketShade.addColorStop(0.75, 'rgba(0,0,0,0)');
-  jacketShade.addColorStop(1,    'rgba(10,18,50,0.55)');
-  cx.fillStyle = jacketShade;
-  cx.fillRect(0, CY + 3, S, S - CY - 3);
-
-  // ── Left lapel (folded-back — lighter inner face visible) ─────────────────
-  cx.fillStyle = '#243a80';
+  // ── 2. Suit body (dark steel-blue) ───────────────────────────────────────
+  cx.fillStyle = '#354566';
   cx.beginPath();
-  cx.moveTo(CX - 6,  CY + 3);    // top (collar notch)
-  cx.lineTo(CX - 12, CY + 8);    // outer shoulder edge
-  cx.lineTo(CX - 5,  CY + 18);   // lapel point
-  cx.lineTo(CX - 3,  CY + 5);    // inner edge meets shirt
-  cx.closePath();
-  cx.fill();
-  // Lapel inner shadow
-  cx.fillStyle = 'rgba(10,18,50,0.30)';
-  cx.beginPath();
-  cx.moveTo(CX - 6,  CY + 3);
-  cx.lineTo(CX - 10, CY + 8);
-  cx.lineTo(CX - 5,  CY + 18);
-  cx.lineTo(CX - 3,  CY + 5);
+  cx.moveTo(CX - R - 2, S + 1);
+  cx.lineTo(CX + R + 2, S + 1);
+  cx.lineTo(CX + R + 2, CY + R - 1);
+  cx.lineTo(CX - R - 2, CY + R - 1);
   cx.closePath();
   cx.fill();
 
-  // ── Right lapel ───────────────────────────────────────────────────────────
-  cx.fillStyle = '#243a80';
+  // ── 3. Hair (amber-blonde, behind face) ───────────────────────────────────
+  // Back hair mass (wide, sweeping right — the comb-over)
+  cx.fillStyle = '#c89030';
   cx.beginPath();
-  cx.moveTo(CX + 6,  CY + 3);
-  cx.lineTo(CX + 12, CY + 8);
-  cx.lineTo(CX + 5,  CY + 18);
-  cx.lineTo(CX + 3,  CY + 5);
-  cx.closePath();
+  cx.ellipse(CX + 1, CY - 4, R + 1.5, R * 0.72, -0.12, 0, Math.PI * 2);
   cx.fill();
-  cx.fillStyle = 'rgba(10,18,50,0.30)';
+  // Left side hair (flows down past ear)
   cx.beginPath();
-  cx.moveTo(CX + 6,  CY + 3);
-  cx.lineTo(CX + 10, CY + 8);
-  cx.lineTo(CX + 5,  CY + 18);
-  cx.lineTo(CX + 3,  CY + 5);
-  cx.closePath();
+  cx.ellipse(CX - R + 0.5, CY + 1, 3, R * 0.62, 0.25, 0, Math.PI * 2);
   cx.fill();
-
-  // ── White shirt (visible in the V between lapels) ─────────────────────────
-  cx.fillStyle = '#f0ede8';
+  // Right side hair (slight puff)
   cx.beginPath();
-  cx.moveTo(CX - 3,  CY + 4);   // left collar
-  cx.lineTo(CX,      CY + 20);  // bottom V point
-  cx.lineTo(CX + 3,  CY + 4);   // right collar
-  cx.closePath();
+  cx.ellipse(CX + R - 0.5, CY + 1, 3.5, R * 0.65, -0.20, 0, Math.PI * 2);
   cx.fill();
-  // Shirt shadow at edges
-  const shirtShade = cx.createLinearGradient(CX - 3, 0, CX + 3, 0);
-  shirtShade.addColorStop(0,   'rgba(160,150,130,0.30)');
-  shirtShade.addColorStop(0.5, 'rgba(0,0,0,0)');
-  shirtShade.addColorStop(1,   'rgba(160,150,130,0.30)');
-  cx.fillStyle = shirtShade;
+  // Forelock highlight (slightly lighter)
+  cx.fillStyle = '#d8a838';
   cx.beginPath();
-  cx.moveTo(CX - 3, CY + 4);
-  cx.lineTo(CX,     CY + 20);
-  cx.lineTo(CX + 3, CY + 4);
-  cx.closePath();
+  cx.ellipse(CX, CY - 7, R * 0.72, 3, -0.10, 0, Math.PI * 2);
   cx.fill();
 
-  // ── Red tie — runs down the shirt opening ────────────────────────────────
-  cx.fillStyle = '#dd0000';
+  // ── 4. Face (peach skin) ──────────────────────────────────────────────────
+  cx.fillStyle = '#f0c8a8';
   cx.beginPath();
-  cx.moveTo(CX - 2.5, CY + 5);    // knot top-left
-  cx.lineTo(CX + 2.5, CY + 5);    // knot top-right
-  cx.lineTo(CX + 3.2, CY + 10);   // blade widens slightly
-  cx.lineTo(CX + 2.0, CY + 20);   // blade
-  cx.lineTo(CX,       CY + 23);   // pointed tip (below shirt V)
-  cx.lineTo(CX - 2.0, CY + 20);
-  cx.lineTo(CX - 3.2, CY + 10);
-  cx.closePath();
+  cx.ellipse(CX, CY, R, R * 0.90, 0, 0, Math.PI * 2);
   cx.fill();
-  // Tie highlight stripe
-  cx.fillStyle = 'rgba(255,100,100,0.38)';
-  cx.beginPath();
-  cx.moveTo(CX - 0.8, CY + 5.5);
-  cx.lineTo(CX + 0.8, CY + 5.5);
-  cx.lineTo(CX + 0.6, CY + 19);
-  cx.lineTo(CX - 0.6, CY + 19);
-  cx.closePath();
-  cx.fill();
-
-  // ══ HAIR ══════════════════════════════════════════════════════════════════
-
-  // Back mass: wide sweep right, above and behind the face
-  cx.fillStyle = '#f0c020';
-  cx.beginPath();
-  cx.ellipse(CX + 2, CY - 7, 15, 8, -0.18, 0, Math.PI * 2);
-  cx.fill();
-
-  // Right-side puff: spills to the right beyond face
-  cx.fillStyle = '#e8b818';
-  cx.beginPath();
-  cx.ellipse(CX + 9, CY - 1, 5, 9, 0.22, 0, Math.PI * 2);
-  cx.fill();
-
-  // Front forelock flip
-  cx.fillStyle = '#f8d030';
-  cx.beginPath();
-  cx.ellipse(CX - 1, CY - 5, 9, 4.5, 0.10, 0, Math.PI * 2);
-  cx.fill();
-
-  // Hair highlight
-  const hairLight = cx.createRadialGradient(CX, CY - 9, 0, CX, CY - 6, 12);
-  hairLight.addColorStop(0,   'rgba(255,248,165,0.78)');
-  hairLight.addColorStop(0.6, 'rgba(240,195,20,0)');
-  cx.fillStyle = hairLight;
-  cx.beginPath();
-  cx.ellipse(CX + 1, CY - 7, 14, 7.5, -0.18, 0, Math.PI * 2);
-  cx.fill();
-
-  // ══ FACE ══════════════════════════════════════════════════════════════════
-
-  cx.save();
-  cx.beginPath();
-  cx.ellipse(CX, CY, R, R * 0.93, 0, 0, Math.PI * 2);
-  cx.clip();
-
-  // Orange skin
-  const skin = cx.createRadialGradient(CX - R * 0.28, CY - R * 0.28, 0, CX, CY, R);
-  skin.addColorStop(0,    '#ffc070');
-  skin.addColorStop(0.40, '#f07028');
-  skin.addColorStop(1,    '#c05010');
-  cx.fillStyle = skin;
-  cx.fillRect(CX - R - 1, CY - R - 1, R * 2 + 2, R * 2 + 2);
-
-  // Jowl shadow
-  const jowl = cx.createLinearGradient(CX, CY + R * 0.3, CX, CY + R);
-  jowl.addColorStop(0, 'rgba(160,55,8,0)');
-  jowl.addColorStop(1, 'rgba(140,48,6,0.44)');
-  cx.fillStyle = jowl;
-  cx.fillRect(CX - R - 1, CY + R * 0.3, R * 2 + 2, R * 0.7);
-
-  // Eyebrows — angular, scowling
-  cx.fillStyle = '#b86015';
+  // Subtle cheek warmth
+  cx.fillStyle = 'rgba(220,140,90,0.22)';
   for (const sign of [-1, 1]) {
-    const bx = CX + sign * R * 0.36;
-    const by = CY - R * 0.40;
     cx.beginPath();
-    cx.moveTo(bx - sign * R * 0.27, by - 0.5);  // outer top
-    cx.lineTo(bx + sign * R * 0.10, by + 1.8);  // inner bottom (drooped)
-    cx.lineTo(bx + sign * R * 0.10, by + 0.8);  // inner top
-    cx.lineTo(bx - sign * R * 0.27, by + 0.6);  // outer bottom
+    cx.ellipse(CX + sign * R * 0.52, CY + R * 0.18, R * 0.28, R * 0.18, 0, 0, Math.PI * 2);
+    cx.fill();
+  }
+
+  // ── 5. White collar V ─────────────────────────────────────────────────────
+  cx.fillStyle = '#f5f2ee';
+  cx.beginPath();
+  cx.moveTo(CX - 4, CY + R - 1);
+  cx.lineTo(CX,     CY + R + 7);
+  cx.lineTo(CX + 4, CY + R - 1);
+  cx.closePath();
+  cx.fill();
+
+  // ── 6. Lapels (slightly lighter steel-blue fold) ──────────────────────────
+  cx.fillStyle = '#4a6082';
+  // Left lapel
+  cx.beginPath();
+  cx.moveTo(CX - 4, CY + R - 1);
+  cx.lineTo(CX - R - 2, CY + R - 1);
+  cx.lineTo(CX - 3,     CY + R + 5);
+  cx.closePath();
+  cx.fill();
+  // Right lapel
+  cx.beginPath();
+  cx.moveTo(CX + 4, CY + R - 1);
+  cx.lineTo(CX + R + 2, CY + R - 1);
+  cx.lineTo(CX + 3,     CY + R + 5);
+  cx.closePath();
+  cx.fill();
+
+  // ── 7. Red tie ────────────────────────────────────────────────────────────
+  cx.fillStyle = '#dd1010';
+  cx.beginPath();
+  cx.moveTo(CX - 2,   CY + R);
+  cx.lineTo(CX + 2,   CY + R);
+  cx.lineTo(CX + 2.5, CY + R + 6);
+  cx.lineTo(CX + 1.5, CY + R + 11);
+  cx.lineTo(CX,       CY + R + 13);
+  cx.lineTo(CX - 1.5, CY + R + 11);
+  cx.lineTo(CX - 2.5, CY + R + 6);
+  cx.closePath();
+  cx.fill();
+  // Tie highlight
+  cx.fillStyle = 'rgba(255,120,120,0.35)';
+  cx.beginPath();
+  cx.moveTo(CX - 0.7, CY + R + 0.5);
+  cx.lineTo(CX + 0.7, CY + R + 0.5);
+  cx.lineTo(CX + 0.5, CY + R + 10);
+  cx.lineTo(CX - 0.5, CY + R + 10);
+  cx.closePath();
+  cx.fill();
+
+  // ── 8. Face features ──────────────────────────────────────────────────────
+
+  // Eyebrows — thick, scowling amber-brown
+  cx.fillStyle = '#7a5012';
+  for (const sign of [-1, 1]) {
+    const bx = CX + sign * R * 0.38;
+    const by = CY - R * 0.38;
+    cx.beginPath();
+    cx.moveTo(bx - sign * R * 0.30, by - 0.5);   // outer (high)
+    cx.lineTo(bx + sign * R * 0.08, by + 1.6);   // inner (drooped scowl)
+    cx.lineTo(bx + sign * R * 0.08, by + 0.6);
+    cx.lineTo(bx - sign * R * 0.30, by + 0.5);
     cx.closePath();
     cx.fill();
   }
 
-  // Eyes — narrow squinting ovals
-  const eyeY  = CY - R * 0.18;
-  const eyeOX = R * 0.36;
+  // Eyes — small squinting ovals
+  const eyeY = CY - R * 0.15;
   for (const sign of [-1, 1]) {
-    const ex = CX + sign * eyeOX;
-    cx.fillStyle = '#ddd8cc';
+    const ex = CX + sign * R * 0.37;
+    cx.fillStyle = '#d8d4c8';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.175, R * 0.082, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.155, R * 0.072, 0, 0, Math.PI * 2);
     cx.fill();
-    cx.fillStyle = '#5577aa';
+    cx.fillStyle = '#33608a';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.082, R * 0.078, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.075, R * 0.068, 0, 0, Math.PI * 2);
     cx.fill();
-    cx.fillStyle = '#0a0a0a';
+    cx.fillStyle = '#080808';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.038, R * 0.038, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.036, R * 0.036, 0, 0, Math.PI * 2);
     cx.fill();
   }
 
-  // Nose
-  cx.fillStyle = 'rgba(175,72,14,0.36)';
+  // Nose (small rounded bump)
+  cx.fillStyle = 'rgba(185,110,60,0.30)';
   cx.beginPath();
-  cx.ellipse(CX, CY + R * 0.16, R * 0.15, R * 0.10, 0, 0, Math.PI * 2);
+  cx.ellipse(CX, CY + R * 0.22, R * 0.14, R * 0.09, 0, 0, Math.PI * 2);
   cx.fill();
 
-  // Mouth — pursed pout
-  cx.strokeStyle = '#c03010';
-  cx.lineWidth   = 1.0;
+  // Mouth — tight pursed line + lower lip curve
+  cx.strokeStyle = '#904030';
+  cx.lineWidth   = 1.1;
   cx.lineCap     = 'round';
   cx.beginPath();
-  cx.moveTo(CX - R * 0.28, CY + R * 0.47);
-  cx.quadraticCurveTo(CX, CY + R * 0.40, CX + R * 0.28, CY + R * 0.47);
+  cx.moveTo(CX - R * 0.26, CY + R * 0.48);
+  cx.quadraticCurveTo(CX, CY + R * 0.42, CX + R * 0.26, CY + R * 0.48);
   cx.stroke();
-  cx.strokeStyle = '#d04020';
-  cx.lineWidth   = 1.3;
+  cx.strokeStyle = '#b04030';
+  cx.lineWidth   = 1.2;
   cx.beginPath();
-  cx.moveTo(CX - R * 0.24, CY + R * 0.49);
-  cx.quadraticCurveTo(CX, CY + R * 0.64, CX + R * 0.24, CY + R * 0.49);
+  cx.moveTo(CX - R * 0.22, CY + R * 0.50);
+  cx.quadraticCurveTo(CX, CY + R * 0.64, CX + R * 0.22, CY + R * 0.50);
   cx.stroke();
 
-  cx.restore();  // end face clip
-
-  // ── Neck (orange strip between face and collar) ───────────────────────────
-  cx.fillStyle = '#e06820';
-  cx.beginPath();
-  cx.ellipse(CX, CY + R + 2, 4.5, 3.5, 0, 0, Math.PI * 2);
-  cx.fill();
+  // ── 9. Tiny US flag pin on left lapel ────────────────────────────────────
+  const px = Math.round(CX - 6);
+  const py = Math.round(CY + R + 1);
+  cx.fillStyle = '#cc1122';
+  cx.fillRect(px, py, 4, 3);
+  cx.fillStyle = '#ffffff';
+  cx.fillRect(px, py + 1, 4, 1);
+  cx.fillStyle = '#1133cc';
+  cx.fillRect(px, py, 1.5, 3);
 
   if (foodSpriteCache.size >= MAX_SPRITE_CACHE) foodSpriteCache.delete(foodSpriteCache.keys().next().value);
   foodSpriteCache.set(key, off);

@@ -96,6 +96,9 @@ export default function App() {
           onReset={reset}
           onPause={pause}
         />
+        {/* D-Pad overlaid on canvas — semitransparent, bottom-center.
+            Hidden on desktop via CSS. */}
+        <DPad onDir={applyDir} />
       </div>
 
       {/* Keyboard hint + quick-action buttons */}
@@ -106,10 +109,6 @@ export default function App() {
         </button>
         <button className="ctrl-btn" onClick={reset}>↺ Reset</button>
       </div>
-
-      {/* Mobile touch controls — hidden on wide screens via CSS.
-          Both D-Pad and swipe are available simultaneously on mobile. */}
-      <DPad onDir={applyDir} />
     </div>
   );
 }

@@ -5,9 +5,8 @@ on:
     branches: [master]
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  pages: write      # upload artifact + trigger Pages deployment
+  id-token: write   # OIDC token required by actions/deploy-pages for keyless auth
 
 concurrency:
   group: pages

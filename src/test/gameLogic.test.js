@@ -13,9 +13,9 @@ import { segPool, POOL_SIZE, initPool, poolGet, poolPrepend } from '../pool';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 describe('constants', () => {
-  it('defines a 20×20 grid', () => {
-    expect(COLS).toBe(20);
-    expect(ROWS).toBe(20);
+  it('defines a 10×10 grid', () => {
+    expect(COLS).toBe(10);
+    expect(ROWS).toBe(10);
   });
 
   it('has exactly 5 levels', () => {
@@ -178,7 +178,7 @@ describe('isWallCollision', () => {
   it('no collision inside the board', () => {
     expect(isWallCollision({ x: 0, y: 0 })).toBe(false);
     expect(isWallCollision({ x: COLS - 1, y: ROWS - 1 })).toBe(false);
-    expect(isWallCollision({ x: 10, y: 10 })).toBe(false);
+    expect(isWallCollision({ x: 5, y: 5 })).toBe(false);
   });
 
   it('left wall: x < 0', () => {

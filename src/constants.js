@@ -1,8 +1,8 @@
 // ─── Grid dimensions ──────────────────────────────────────────────────────────
 // The board is a COLS × ROWS grid. Each cell is CELL logical pixels square.
 // Changing COLS/ROWS resizes the board; changing CELL resizes the visual size.
-export const COLS = 20;          // number of columns
-export const ROWS = 20;          // number of rows
+export const COLS = 10;          // number of columns
+export const ROWS = 10;          // number of rows
 export const CELL = 20;          // pixels per cell (logical, before devicePixelRatio)
 
 // ─── Level definitions ────────────────────────────────────────────────────────
@@ -17,6 +17,13 @@ export const LEVELS = [
   // speed = setInterval delay in ms (lower = faster)
   // color  = snake body color + UI accent for that level
 ];
+
+// ─── Input constants ──────────────────────────────────────────────────────────
+// Minimum pixel travel for a touch to register as a directional swipe.
+export const SWIPE_THRESHOLD = 20;
+// Maximum number of buffered direction changes before new inputs are dropped.
+// Keeps the queue bounded; two buffered turns is enough for any legitimate play.
+export const DIR_QUEUE_MAX = 2;
 
 // ─── Direction vectors ────────────────────────────────────────────────────────
 // Convenience constants; not used by the core loop (which stores {x,y} inline)

@@ -25,11 +25,11 @@
  *   non-canvas UI (Scoreboard, LevelBar, Overlay, buttons).
  */
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { COLS, ROWS, LEVELS } from '../constants';
+import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX } from '../constants';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
-const INIT_SNAKE = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
 const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 
 // Seed the pool with the initial snake on module load.
@@ -50,30 +50,41 @@ function readBestScore() {
     return 0;
   }
 }
-const INIT_BEST = readBestScore();
+// Note: INIT_BEST intentionally NOT computed here at module load.
+// useState(readBestScore) uses the function as a lazy initializer so it runs
+// on the hook's first render — this ensures localStorage is read fresh for
+// each hook instance (critical for test isolation and React Strict Mode).
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Pick a random grid cell not occupied by the snake ring buffer.
- * headIdx / snakeLen describe the current ring state in segPool.
- * Includes an iteration cap so a nearly-full board can't loop forever.
+ * Pick a random free grid cell not occupied by the snake.
+ *
+ * O(n) implementation: build a Set of occupied cells once, then sample
+ * from the list of free cells directly. Avoids the O(n²) retry loop that
+ * the previous random-probe approach caused on large snakes.
+ *
+ * Returns null only when every cell is occupied (board full = game won).
+ * Caller is responsible for handling null without moving the food.
  */
 function randomFood(headIdx, snakeLen) {
-  let pos;
-  let attempts = 0;
-  let occupied;
-  do {
-    pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
-    attempts++;
-    occupied = false;
-    for (let i = 0; i < snakeLen; i++) {
-      const s = segPool[(headIdx + i) % POOL_SIZE];
-      if (s.x === pos.x && s.y === pos.y) { occupied = true; break; }
+  // Build occupied set in one pass
+  const occupied = new Set();
+  for (let i = 0; i < snakeLen; i++) {
+    const s = segPool[(headIdx + i) % POOL_SIZE];
+    occupied.add(s.x * ROWS + s.y);
+  }
+
+  // Collect all free cells
+  const free = [];
+  for (let x = 0; x < COLS; x++) {
+    for (let y = 0; y < ROWS; y++) {
+      if (!occupied.has(x * ROWS + y)) free.push({ x, y });
     }
-  } while (attempts < 1000 && occupied);
-  if (occupied) return null;  // board too full; caller keeps existing food
-  return pos;
+  }
+
+  if (free.length === 0) return null;  // board full
+  return free[Math.floor(Math.random() * free.length)];
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -82,7 +93,7 @@ export function useSnake() {
   // ── React state (drives non-canvas UI re-renders) ───────────────────────────
   // snake and food are intentionally NOT state — GameCanvas reads refs directly.
   const [score, setScore]       = useState(0);
-  const [best, setBest]         = useState(INIT_BEST);
+  const [best, setBest]         = useState(readBestScore);
   const [levelIndex, setLevel]  = useState(0);
   const [state, setState]       = useState('idle');
 
@@ -94,9 +105,9 @@ export function useSnake() {
   const headIdxRef  = useRef(0);                // index of head segment in segPool
   const snakeLenRef = useRef(INIT_SNAKE.length);// live segment count
 
-  const foodRef     = useRef({ x: 15, y: 10 });
+  const foodRef     = useRef({ x: 7, y: 5 });
   const scoreRef    = useRef(0);
-  const bestRef     = useRef(INIT_BEST);
+  const bestRef     = useRef(best);
   const levelRef    = useRef(0);
   const intervalRef = useRef(null);
   const stateRef    = useRef('idle');
@@ -205,7 +216,10 @@ export function useSnake() {
         startLoop(lvl);
       }
 
-      // Spawn new food at a free cell
+      // Spawn new food at a free cell.
+      // randomFood returns null only when every cell is occupied (board full).
+      // In that case food stays where it is; the snake can't reach it without
+      // self-collision, so no re-scoring is possible.
       const newFood = randomFood(headIdxRef.current, snakeLenRef.current);
       if (newFood) {
         foodRef.current = newFood;
@@ -217,6 +231,17 @@ export function useSnake() {
     }
 
     // No setSnake / setFood — GameCanvas reads headIdxRef/snakeLenRef/foodRef directly.
+  //
+  // State sync note: scoreRef/bestRef/levelRef are updated synchronously BEFORE
+  // their matching setState calls. This is intentional — the canvas only reads
+  // position refs (headIdxRef, snakeLenRef, foodRef), never scoreRef/levelRef.
+  // Score/level state is consumed solely by non-canvas UI (Scoreboard, LevelBar)
+  // which renders on the next React flush. No mismatch window exists in practice.
+  //
+  // tick() closes over startLoop (stable useCallback) and reads all other values
+  // via refs — refs are always current so no stale closure risk.
+  // exhaustive-deps would demand listing every ref object, causing tick() to be
+  // recreated unnecessarily on every render. Suppressed intentionally.
   }, [startLoop]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep tickRef pointing to the latest tick after every render.
@@ -232,7 +257,10 @@ export function useSnake() {
     if (newDir.x === -last.x && newDir.y === -last.y) return;
     if (newDir.x === last.x  && newDir.y === last.y)  return;
 
-    if (dirQueueRef.current.length < 2) {
+    // Queue is capped at DIR_QUEUE_MAX (2). Inputs beyond that are dropped
+    // intentionally — two buffered turns cover any legitimate play pattern
+    // and prevent queue bloat from rapid key-mashing.
+    if (dirQueueRef.current.length < DIR_QUEUE_MAX) {
       dirQueueRef.current.push(newDir);
     }
 
@@ -257,13 +285,26 @@ export function useSnake() {
 
   const reset = useCallback(() => {
     stopLoop();
-    const initSegs = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
-    headIdxRef.current  = initPool(initSegs);   // returns 0; fills pool
-    snakeLenRef.current = initSegs.length;
+    headIdxRef.current  = initPool(INIT_SNAKE);   // returns 0; fills pool
+    snakeLenRef.current = INIT_SNAKE.length;
     dirRef.current      = { x: 1, y: 0 };
     dirQueueRef.current = [];
+    // randomFood on a 3-segment snake has 97 free cells on a 10×10 grid — null is impossible here.
+    // Fallback picks the first free cell deterministically rather than a hardcoded
+    // coordinate that could coincide with the snake if INIT_SNAKE ever changes.
     const initFood = randomFood(headIdxRef.current, snakeLenRef.current);
-    foodRef.current     = initFood ?? { x: 15, y: 10 };
+    if (!initFood) {
+      // Should never happen; guard against future INIT_SNAKE changes.
+      const occupied = new Set(INIT_SNAKE.map(s => `${s.x},${s.y}`));
+      for (let x = 0; x < COLS; x++) {
+        for (let y = 0; y < ROWS; y++) {
+          if (!occupied.has(`${x},${y}`)) { foodRef.current = { x, y }; break; }
+        }
+        if (foodRef.current !== undefined) break;
+      }
+    } else {
+      foodRef.current = initFood;
+    }
     scoreRef.current    = 0;
     levelRef.current    = 0;
     stateRef.current    = 'idle';
@@ -296,16 +337,29 @@ export function useSnake() {
   }, [applyDir, pause, reset]);
 
   useEffect(() => {
+    // Track whether the pause was triggered automatically by a tab hide,
+    // so the resume on tab restore only undoes auto-pauses (not manual ones).
+    let autoPaused = false;
     const onVisibility = () => {
-      if (document.hidden && stateRef.current === 'running') {
-        stopLoop();
-        stateRef.current = 'paused';
-        setState('paused');
+      if (document.hidden) {
+        if (stateRef.current === 'running') {
+          stopLoop();
+          stateRef.current = 'paused';
+          setState('paused');
+          autoPaused = true;
+        }
+      } else {
+        if (autoPaused && stateRef.current === 'paused') {
+          autoPaused = false;
+          stateRef.current = 'running';
+          setState('running');
+          startLoop(levelRef.current);
+        }
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [stopLoop]);
+  }, [stopLoop, startLoop]);
 
   useEffect(() => {
     return () => stopLoop();

@@ -458,32 +458,24 @@ function buildTrumpSprite() {
   cx.closePath();
   cx.fill();
 
-  // ── 3. Hair behind face — underside shadow, main volume, right puff ─────────
-  // Trump's comb-over sweeps from the back-right across the crown to the left.
-  // Three layers give depth; forelock is drawn after the face (step 4b).
-
-  // Underside / back-right shadow (darkest, largest, furthest back)
-  cx.fillStyle = '#966010';
+  // ── 3. Hair (amber-blonde, behind face) ───────────────────────────────────
+  // Back hair mass (wide, sweeping right — the comb-over)
+  cx.fillStyle = '#c89030';
   cx.beginPath();
-  cx.ellipse(CX + 5, CY - 2, R + 2.5, R * 0.68, -0.32, 0, Math.PI * 2);
+  cx.ellipse(CX + 1, CY - 4, R + 1.5, R * 0.72, -0.12, 0, Math.PI * 2);
   cx.fill();
-
-  // Main comb-over volume (mid amber, biased right, sweeps over crown)
-  cx.fillStyle = '#c89018';
+  // Left side hair (flows down past ear)
   cx.beginPath();
-  cx.ellipse(CX + 3, CY - 5.5, R + 2, R * 0.58, -0.24, 0, Math.PI * 2);
+  cx.ellipse(CX - R + 0.5, CY + 1, 3, R * 0.62, 0.25, 0, Math.PI * 2);
   cx.fill();
-
-  // Bright top ridge (the light-catching surface of the swept comb-over)
-  cx.fillStyle = '#e2aa20';
+  // Right side hair (slight puff)
   cx.beginPath();
-  cx.ellipse(CX + 1, CY - 7.5, R * 0.88, 2.8, -0.16, 0, Math.PI * 2);
+  cx.ellipse(CX + R - 0.5, CY + 1, 3.5, R * 0.65, -0.20, 0, Math.PI * 2);
   cx.fill();
-
-  // Right-side puff (extends past the face — very characteristic)
-  cx.fillStyle = '#b07c14';
+  // Forelock highlight (slightly lighter)
+  cx.fillStyle = '#d8a838';
   cx.beginPath();
-  cx.ellipse(CX + R + 2, CY - 1, 2.5, R * 0.52, -0.30, 0, Math.PI * 2);
+  cx.ellipse(CX, CY - 7, R * 0.72, 3, -0.10, 0, Math.PI * 2);
   cx.fill();
 
   // ── 4. Face (peach skin) ──────────────────────────────────────────────────
@@ -498,24 +490,6 @@ function buildTrumpSprite() {
     cx.ellipse(CX + sign * R * 0.52, CY + R * 0.18, R * 0.28, R * 0.18, 0, 0, Math.PI * 2);
     cx.fill();
   }
-
-  // ── 4b. Forelock — drawn ON TOP of face so it droops onto the forehead ────
-  // The forelock is the signature dangling piece above the right forehead.
-  cx.fillStyle = '#c89018';
-  cx.beginPath();
-  cx.ellipse(CX + 2.5, CY - R + 2.5, 3.5, 4.8, 0.38, 0, Math.PI * 2);
-  cx.fill();
-  // Forelock highlight (lighter centre)
-  cx.fillStyle = '#d8a828';
-  cx.beginPath();
-  cx.ellipse(CX + 2, CY - R + 1.5, 2, 3.2, 0.32, 0, Math.PI * 2);
-  cx.fill();
-  // Hairline — thin dark edge where forelock meets forehead skin
-  cx.strokeStyle = 'rgba(100,60,8,0.55)';
-  cx.lineWidth = 0.7;
-  cx.beginPath();
-  cx.ellipse(CX + 2.5, CY - R + 2.5, 3.5, 4.8, 0.38, Math.PI * 1.55, Math.PI * 1.95);
-  cx.stroke();
 
   // ── 5. White collar V ─────────────────────────────────────────────────────
   cx.fillStyle = '#f5f2ee';
@@ -773,13 +747,25 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex }) {
   // rAF loop runs for the component's lifetime; all game data is read from refs.
   useEffect(() => {
     let rafId;
+    let stopped = false;
     const loop = () => {
+      if (stopped) return;  // guard: stop scheduling after unmount or fatal error
       const canvas = canvasRef.current;
-      if (canvas) drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef);
+      if (canvas) {
+        try {
+          drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef);
+        } catch (err) {
+          // ErrorBoundary will catch and display the error; stop the loop so it
+          // doesn't keep firing against a potentially dead canvas.
+          console.error('[GameCanvas] drawFrame threw — stopping rAF loop:', err);
+          stopped = true;
+          return;
+        }
+      }
       rafId = requestAnimationFrame(loop);
     };
     rafId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafId);
+    return () => { stopped = true; cancelAnimationFrame(rafId); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

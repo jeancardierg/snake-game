@@ -22,12 +22,8 @@ import { GameCanvas } from './components/GameCanvas';
 import { Scoreboard } from './components/Scoreboard';
 import { LevelBar } from './components/LevelBar';
 import { Overlay } from './components/Overlay';
-import { DIR } from './constants';
+import { DIR, SWIPE_THRESHOLD } from './constants';
 import './index.css';
-
-// Minimum pixel travel required for a touch move to count as a directional swipe.
-// Too low → accidental swipes on taps; too high → feels sluggish.
-const SWIPE_THRESHOLD = 20;
 
 export default function App() {
   // All game state and actions come from a single hook

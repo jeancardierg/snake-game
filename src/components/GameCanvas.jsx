@@ -691,20 +691,20 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
   const hxF   = skip ? head.x : anim.prevCell.x + dxRaw * t;
   const hyF   = skip ? head.y : anim.prevCell.y + dyRaw * t;
 
-  // ── Layer 2: food (Trump face) ────────────────────────────────────────────
+  // ── Layer 2: food (Trump face) — hard-capped at 8×8 px on screen ─────────
+  const FOOD_DRAW = 8;                                   // max rendered size
   const fx = food.x * CELL + CELL / 2;
   const fy = food.y * CELL + CELL / 2;
 
   const foodGlow = buildGlowSprite('#ff8800', FOOD_RADIUS, FOOD_GLOW);
   if (foodGlow) {
-    ctx.globalAlpha = 0.50;
+    ctx.globalAlpha = 0.45;
     ctx.drawImage(foodGlow, fx - FOOD_TOTAL, fy - FOOD_TOTAL, FOOD_TOTAL * 2, FOOD_TOTAL * 2);
     ctx.globalAlpha = 1;
   }
   const foodSpr = buildTrumpSprite();
   if (foodSpr) {
-    const S = CELL + FOOD_PAD * 2;
-    ctx.drawImage(foodSpr, food.x * CELL - FOOD_PAD, food.y * CELL - FOOD_PAD, S, S);
+    ctx.drawImage(foodSpr, fx - FOOD_DRAW / 2, fy - FOOD_DRAW / 2, FOOD_DRAW, FOOD_DRAW);
   }
 
   // ── Layer 3: snake body (tail → neck, drawn back-to-front) ───────────────

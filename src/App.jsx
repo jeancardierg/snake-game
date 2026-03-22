@@ -31,7 +31,7 @@ const SWIPE_THRESHOLD = 20;
 
 export default function App() {
   // All game state and actions come from a single hook
-  const { snake, food, score, best, levelIndex, state, applyDir, pause, reset } = useSnake();
+  const { headIdxRef, snakeLenRef, foodRef, score, best, levelIndex, state, applyDir, pause, reset } = useSnake();
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
   // Track where each touch started. Using a ref so the handlers are stable
@@ -81,7 +81,7 @@ export default function App() {
         onTouchEnd={handleSwipeEnd}
         style={{ touchAction: 'none' }}
       >
-        <GameCanvas snake={snake} food={food} levelIndex={levelIndex} />
+        <GameCanvas headIdxRef={headIdxRef} snakeLenRef={snakeLenRef} foodRef={foodRef} levelIndex={levelIndex} />
         <Overlay
           state={state}
           score={score}

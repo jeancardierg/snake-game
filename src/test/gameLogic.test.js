@@ -6,8 +6,9 @@
  * game loop.  React rendering and hook side-effects are intentionally NOT
  * covered here — see useSnake.test.jsx for integration-level hook tests.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { COLS, ROWS, LEVELS, DIR } from '../constants';
+import { segPool, POOL_SIZE, initPool, poolGet, poolPrepend } from '../pool';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -214,6 +215,80 @@ describe('isSelfCollision', () => {
 
   it('no collision with an empty snake array', () => {
     expect(isSelfCollision({ x: 0, y: 0 }, [])).toBe(false);
+  });
+});
+
+// ── Object pool (ring buffer) ─────────────────────────────────────────────────
+
+describe('pool', () => {
+  const SEGS = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+
+  beforeEach(() => {
+    // Restore a known pool state before each test
+    initPool(SEGS);
+  });
+
+  it('initPool writes segments head-first and returns headIdx 0', () => {
+    const hi = initPool(SEGS);
+    expect(hi).toBe(0);
+    expect(segPool[0]).toEqual({ x: 10, y: 10 });
+    expect(segPool[1]).toEqual({ x: 9,  y: 10 });
+    expect(segPool[2]).toEqual({ x: 8,  y: 10 });
+  });
+
+  it('poolGet returns correct segment at each logical index', () => {
+    expect(poolGet(0, 0)).toEqual({ x: 10, y: 10 });  // head
+    expect(poolGet(0, 1)).toEqual({ x: 9,  y: 10 });
+    expect(poolGet(0, 2)).toEqual({ x: 8,  y: 10 });  // tail
+  });
+
+  it('poolPrepend inserts a new head and returns updated headIdx', () => {
+    const newHead = poolPrepend(0, 11, 10);
+    expect(newHead).toBe(POOL_SIZE - 1);       // wraps to end of pool
+    expect(segPool[newHead]).toEqual({ x: 11, y: 10 });
+    // Old head is now at logical index 1
+    expect(poolGet(newHead, 1)).toEqual({ x: 10, y: 10 });
+    expect(poolGet(newHead, 2)).toEqual({ x: 9,  y: 10 });
+    expect(poolGet(newHead, 3)).toEqual({ x: 8,  y: 10 });
+  });
+
+  it('poolPrepend wraps correctly when headIdx is already at POOL_SIZE - 1', () => {
+    // Set headIdx to last slot
+    const hi = POOL_SIZE - 1;
+    segPool[hi].x = 5; segPool[hi].y = 5;
+    const newHead = poolPrepend(hi, 6, 5);
+    expect(newHead).toBe(POOL_SIZE - 2);
+    expect(segPool[newHead]).toEqual({ x: 6, y: 5 });
+  });
+
+  it('consecutive prepends simulate forward snake movement', () => {
+    // Start: headIdx=0, seg[0]={10,10}, seg[1]={9,10}, seg[2]={8,10}
+    // Move right: prepend {11,10}, "pop" tail by decrementing length
+    let hi = 0;
+    let len = 3;
+    hi = poolPrepend(hi, 11, 10);
+    len++;   // prepend added one
+    len--;   // tail popped (no food)
+    // Length stays 3; head moved right
+    expect(len).toBe(3);
+    expect(poolGet(hi, 0)).toEqual({ x: 11, y: 10 });
+    expect(poolGet(hi, 1)).toEqual({ x: 10, y: 10 });
+    expect(poolGet(hi, 2)).toEqual({ x: 9,  y: 10 });
+    // {8,10} is still in the pool but outside snakeLen — logically gone
+  });
+
+  it('growing (eating food) increases logical length', () => {
+    let hi = 0;
+    let len = 3;
+    hi = poolPrepend(hi, 11, 10);
+    len++;  // prepend + no pop = grow by 1
+    expect(len).toBe(4);
+    expect(poolGet(hi, 0)).toEqual({ x: 11, y: 10 });
+    expect(poolGet(hi, 3)).toEqual({ x: 8,  y: 10 });
+  });
+
+  it('POOL_SIZE equals COLS * ROWS', () => {
+    expect(POOL_SIZE).toBe(COLS * ROWS);
   });
 });
 

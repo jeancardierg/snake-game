@@ -19,9 +19,10 @@
 import { LEVELS } from '../constants';
 
 export function LevelBar({ score, levelIndex }) {
-  const level = LEVELS[levelIndex];
-  const next  = LEVELS[levelIndex + 1];  // undefined on the final level
-  const prev  = levelIndex > 0 ? LEVELS[levelIndex - 1].scoreNext : 0;
+  const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
+  const level = LEVELS[safeIdx];
+  const next  = LEVELS[safeIdx + 1];  // undefined on the final level
+  const prev  = safeIdx > 0 ? LEVELS[safeIdx - 1].scoreNext : 0;
 
   // On the final level next is undefined, so show a full bar (progress = 1)
   const progress = next

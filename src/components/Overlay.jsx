@@ -22,7 +22,7 @@ export function Overlay({ state, score, levelIndex, onReset, onPause }) {
   // During active play, render nothing — let the canvas show through
   if (state === 'running') return null;
 
-  const level = LEVELS[levelIndex];
+  const level = LEVELS[levelIndex] ?? LEVELS[LEVELS.length - 1];
 
   if (state === 'idle') {
     return (

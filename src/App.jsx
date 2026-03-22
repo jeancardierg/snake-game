@@ -39,13 +39,14 @@ export default function App() {
   const swipeStart = useRef(null);
 
   const handleSwipeStart = useCallback((e) => {
+    if (!e.touches.length) return;  // touchstart always has ≥1 touch, but guard defensively
     // Record only the first touch point (identifier 0 in multi-touch scenarios)
     const t = e.touches[0];
     swipeStart.current = { x: t.clientX, y: t.clientY };
   }, []);
 
   const handleSwipeEnd = useCallback((e) => {
-    if (!swipeStart.current) return;
+    if (!swipeStart.current || !e.changedTouches.length) return;
 
     const t = e.changedTouches[0];
     const dx = t.clientX - swipeStart.current.x;

@@ -112,6 +112,14 @@ function getGridCanvas() {
   return off;
 }
 
+// ─── Sprite cache shared limit ───────────────────────────────────────────────
+// Each cache is keyed by color/type/dpr and stays small in normal play (~40
+// entries total), but has no natural upper bound — e.g. dragging the window
+// across monitors with different devicePixelRatio values adds new entries
+// indefinitely.  MAX_SPRITE_CACHE caps each cache independently; when exceeded
+// the oldest entry (FIFO via Map insertion order) is evicted.
+const MAX_SPRITE_CACHE = 40;
+
 // ─── Glow halo sprite cache ───────────────────────────────────────────────────
 // Radial-gradient halos extend beyond the cell boundary, giving each element
 // a subtle ambient-light bloom.  Built once per (color, radius, glowSize, dpr).
@@ -141,6 +149,7 @@ function buildGlowSprite(color, radius, glowSize) {
   cx.arc(total, total, total, 0, Math.PI * 2);
   cx.fill();
 
+  if (glowCache.size >= MAX_SPRITE_CACHE) glowCache.delete(glowCache.keys().next().value);
   glowCache.set(key, off);
   return off;
 }
@@ -210,6 +219,7 @@ function buildSegSprite(color, isHead) {
   cx.ellipse(CELL * 0.39, CELL * 0.22, CELL * 0.073, CELL * 0.047, -0.30, 0, Math.PI * 2);
   cx.fill();
 
+  if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
   segSpriteCache.set(key, off);
   return off;
 }
@@ -282,6 +292,7 @@ function buildFoodSprite() {
   );
   cx.fill();
 
+  if (foodSpriteCache.size >= MAX_SPRITE_CACHE) foodSpriteCache.delete(foodSpriteCache.keys().next().value);
   foodSpriteCache.set(key, off);
   return off;
 }

@@ -36,6 +36,22 @@ const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 // reset() re-seeds on every game restart.
 initPool(INIT_SNAKE);
 
+/**
+ * Read the persisted best score from localStorage.
+ * Called once at module load — result shared by both useState and useRef
+ * initialisers so the two values are guaranteed to be identical.
+ * Logs a warning (never throws) when storage is unavailable.
+ */
+function readBestScore() {
+  try {
+    return parseInt(localStorage.getItem('snakeBest') || '0', 10);
+  } catch (e) {
+    console.warn('[useSnake] localStorage unavailable:', e.message);
+    return 0;
+  }
+}
+const INIT_BEST = readBestScore();
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -66,9 +82,7 @@ export function useSnake() {
   // ── React state (drives non-canvas UI re-renders) ───────────────────────────
   // snake and food are intentionally NOT state — GameCanvas reads refs directly.
   const [score, setScore]       = useState(0);
-  const [best, setBest]         = useState(
-    () => { try { return parseInt(localStorage.getItem('snakeBest') || '0'); } catch { return 0; } }
-  );
+  const [best, setBest]         = useState(INIT_BEST);
   const [levelIndex, setLevel]  = useState(0);
   const [state, setState]       = useState('idle');
 
@@ -82,9 +96,7 @@ export function useSnake() {
 
   const foodRef     = useRef({ x: 15, y: 10 });
   const scoreRef    = useRef(0);
-  const bestRef     = useRef(
-    (() => { try { return parseInt(localStorage.getItem('snakeBest') || '0'); } catch { return 0; } })()
-  );
+  const bestRef     = useRef(INIT_BEST);
   const levelRef    = useRef(0);
   const intervalRef = useRef(null);
   const stateRef    = useRef('idle');
@@ -164,6 +176,11 @@ export function useSnake() {
     // 4. Prepend new head in-place (no allocation)
     headIdxRef.current = poolPrepend(headIdxRef.current, hx, hy);
     snakeLenRef.current++;
+    // Dev-only overflow guard: the snake can never legitimately reach POOL_SIZE
+    // (self-collision kills it first), so this fires only if there is a bug.
+    if (import.meta.env.DEV && snakeLenRef.current > POOL_SIZE) {
+      console.error('[useSnake] snake length exceeded POOL_SIZE — ring buffer overflow imminent');
+    }
 
     const ate = hx === foodRef.current.x && hy === foodRef.current.y;
 
@@ -176,7 +193,7 @@ export function useSnake() {
       if (newScore > bestRef.current) {
         bestRef.current = newScore;
         setBest(newScore);
-        try { localStorage.setItem('snakeBest', String(newScore)); } catch { /* ignored */ }
+        try { localStorage.setItem('snakeBest', String(newScore)); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
       }
 
       // Level-up: while loop handles jumping past multiple thresholds at once

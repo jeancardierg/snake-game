@@ -99,12 +99,14 @@ function getGridCanvas() {
     }
   }
 
-  // ── Alborz mountain silhouette (rows 1–4) ────────────────────────────────────
+  // ── Alborz mountain silhouette (confined to sky band) ────────────────────────
   // Three overlapping ridgelines in receding blue-grey tones.
+  // Shapes fill FROM the ridge profile UP to the top of the canvas (not down to
+  // the bottom), so they appear as silhouettes against the sky only.
   const ridges = [
-    { yBase: skyH * 1.05, amp: 38, freq: 0.018, color: '#7a8fa0', alpha: 0.82 },  // far ridge
-    { yBase: skyH * 0.88, amp: 28, freq: 0.024, color: '#91a3b5', alpha: 0.70 },  // mid ridge
-    { yBase: skyH * 0.72, amp: 20, freq: 0.032, color: '#a8bbc9', alpha: 0.55 },  // near ridge
+    { yBase: skyH * 0.98, amp: 36, freq: 0.018, color: '#7a8fa0', alpha: 0.85 },  // far ridge
+    { yBase: skyH * 0.90, amp: 26, freq: 0.024, color: '#91a3b5', alpha: 0.72 },  // mid ridge
+    { yBase: skyH * 0.82, amp: 18, freq: 0.032, color: '#a8bbc9', alpha: 0.58 },  // near ridge
   ];
 
   for (const ridge of ridges) {
@@ -112,16 +114,18 @@ function getGridCanvas() {
     ctx.globalAlpha = ridge.alpha;
     ctx.fillStyle   = ridge.color;
     ctx.beginPath();
-    ctx.moveTo(0, SIZE);
+    ctx.moveTo(0, skyH);                      // start at desert horizon, left edge
     for (let x = 0; x <= SIZE; x += 2) {
       // Stack three sine harmonics for natural-looking peaks
       const y = ridge.yBase
         - Math.sin(x * ridge.freq + 0.8)         * ridge.amp
         - Math.sin(x * ridge.freq * 2.3 + 2.1)   * ridge.amp * 0.42
         - Math.sin(x * ridge.freq * 0.57 + 1.3)  * ridge.amp * 0.28;
-      if (x === 0) ctx.moveTo(0, y); else ctx.lineTo(x, y);
+      ctx.lineTo(x, Math.min(y, skyH));        // cap at horizon — peaks only in sky
     }
-    ctx.lineTo(SIZE, SIZE);
+    ctx.lineTo(SIZE, skyH);                   // end at desert horizon, right edge
+    ctx.lineTo(SIZE, 0);                      // up to top-right corner
+    ctx.lineTo(0, 0);                         // across to top-left corner
     ctx.closePath();
     ctx.fill();
     ctx.restore();

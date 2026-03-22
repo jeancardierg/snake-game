@@ -33,7 +33,7 @@ const SIZE = COLS * CELL;  // 400 × 400 logical pixels at default settings
 const FOOD_RADIUS = CELL / 2 - 2;               // 8  — food circle radius
 const FOOD_GLOW   = 14;                          // halo size around food
 const FOOD_TOTAL  = FOOD_RADIUS + FOOD_GLOW;     // 22
-const FOOD_PAD    = 3;                           // sprite padding for drop shadow
+const FOOD_PAD    = 8;                           // portrait overhang — gives room for suit below face
 const HEAD_RADIUS = CELL / 2 - 1;               // 9  — head glow inner radius
 const HEAD_GLOW   = 10;                          // halo size around head
 const HEAD_TOTAL  = HEAD_RADIUS + HEAD_GLOW;     // 19
@@ -437,8 +437,9 @@ function buildCobraHeadSprite() {
   return off;
 }
 
-// ─── Food sprite cache (Trump caricature) ─────────────────────────────────────
-// A (CELL + FOOD_PAD*2) × (CELL + FOOD_PAD*2) canvas containing a Trump face.
+// ─── Food sprite cache (Trump portrait — head to armpit) ──────────────────────
+// 36×36 px canvas (CELL=20 + FOOD_PAD*2=16) showing hair, face, neck,
+// navy suit shoulders, white shirt and red tie.
 const foodSpriteCache = new Map();
 
 function buildTrumpSprite() {
@@ -446,10 +447,10 @@ function buildTrumpSprite() {
   const key = `trump:${dpr}`;
   if (foodSpriteCache.has(key)) return foodSpriteCache.get(key);
 
-  const S  = CELL + FOOD_PAD * 2;   // 26×26 logical px
-  const CX = S / 2;                 // 13
-  const CY = S / 2 + 1;            // shifted down 1px — more room for hair above
-  const R  = FOOD_RADIUS + 1;      // bump face radius to 9 for more pixel real-estate
+  const S  = CELL + FOOD_PAD * 2;   // 36 logical px
+  const CX = S / 2;                 // 18 — horizontal centre
+  const CY = 14;                    // face centre (upper half of canvas)
+  const R  = 8;                     // face radius
 
   const off = document.createElement('canvas');
   off.width  = S * dpr;
@@ -458,164 +459,229 @@ function buildTrumpSprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // ── Drop shadow ───────────────────────────────────────────────────────────
-  const shadow = cx.createRadialGradient(CX + 1, CY + 2, 0, CX + 1, CY + 2, R + 3);
-  shadow.addColorStop(0, 'rgba(0,0,0,0.48)');
+  // ── Drop shadow (behind the whole portrait) ───────────────────────────────
+  const shadow = cx.createRadialGradient(CX + 1, CY + 2, 0, CX + 1, CY + 3, R + 6);
+  shadow.addColorStop(0, 'rgba(0,0,0,0.40)');
   shadow.addColorStop(1, 'rgba(0,0,0,0)');
   cx.fillStyle = shadow;
+  cx.fillRect(0, 0, S, S);
+
+  // ══ SUIT (drawn first — everything else overlays it) ═════════════════════
+
+  // ── Jacket body — wide navy trapezoid filling lower portion ──────────────
+  cx.fillStyle = '#1c3472';
   cx.beginPath();
-  cx.arc(CX + 1, CY + 2, R + 4, 0, Math.PI * 2);
+  cx.moveTo(0,       S);         // bottom-left corner
+  cx.lineTo(S,       S);         // bottom-right corner
+  cx.lineTo(S,       CY + 10);   // right armpit
+  cx.lineTo(CX + 12, CY + 6);    // right shoulder slope
+  cx.lineTo(CX + 6,  CY + 3);    // right collar
+  cx.lineTo(CX - 6,  CY + 3);    // left collar
+  cx.lineTo(CX - 12, CY + 6);    // left shoulder slope
+  cx.lineTo(0,       CY + 10);   // left armpit
+  cx.closePath();
   cx.fill();
 
-  // ── Red tie — drawn FIRST so it sits behind/below the face ────────────────
-  // Long wide tie is Trump's most iconic wardrobe item.
+  // Jacket side shadow (darker edges for 3D depth)
+  const jacketShade = cx.createLinearGradient(0, 0, S, 0);
+  jacketShade.addColorStop(0,    'rgba(10,18,50,0.55)');
+  jacketShade.addColorStop(0.25, 'rgba(0,0,0,0)');
+  jacketShade.addColorStop(0.75, 'rgba(0,0,0,0)');
+  jacketShade.addColorStop(1,    'rgba(10,18,50,0.55)');
+  cx.fillStyle = jacketShade;
+  cx.fillRect(0, CY + 3, S, S - CY - 3);
+
+  // ── Left lapel (folded-back — lighter inner face visible) ─────────────────
+  cx.fillStyle = '#243a80';
+  cx.beginPath();
+  cx.moveTo(CX - 6,  CY + 3);    // top (collar notch)
+  cx.lineTo(CX - 12, CY + 8);    // outer shoulder edge
+  cx.lineTo(CX - 5,  CY + 18);   // lapel point
+  cx.lineTo(CX - 3,  CY + 5);    // inner edge meets shirt
+  cx.closePath();
+  cx.fill();
+  // Lapel inner shadow
+  cx.fillStyle = 'rgba(10,18,50,0.30)';
+  cx.beginPath();
+  cx.moveTo(CX - 6,  CY + 3);
+  cx.lineTo(CX - 10, CY + 8);
+  cx.lineTo(CX - 5,  CY + 18);
+  cx.lineTo(CX - 3,  CY + 5);
+  cx.closePath();
+  cx.fill();
+
+  // ── Right lapel ───────────────────────────────────────────────────────────
+  cx.fillStyle = '#243a80';
+  cx.beginPath();
+  cx.moveTo(CX + 6,  CY + 3);
+  cx.lineTo(CX + 12, CY + 8);
+  cx.lineTo(CX + 5,  CY + 18);
+  cx.lineTo(CX + 3,  CY + 5);
+  cx.closePath();
+  cx.fill();
+  cx.fillStyle = 'rgba(10,18,50,0.30)';
+  cx.beginPath();
+  cx.moveTo(CX + 6,  CY + 3);
+  cx.lineTo(CX + 10, CY + 8);
+  cx.lineTo(CX + 5,  CY + 18);
+  cx.lineTo(CX + 3,  CY + 5);
+  cx.closePath();
+  cx.fill();
+
+  // ── White shirt (visible in the V between lapels) ─────────────────────────
+  cx.fillStyle = '#f0ede8';
+  cx.beginPath();
+  cx.moveTo(CX - 3,  CY + 4);   // left collar
+  cx.lineTo(CX,      CY + 20);  // bottom V point
+  cx.lineTo(CX + 3,  CY + 4);   // right collar
+  cx.closePath();
+  cx.fill();
+  // Shirt shadow at edges
+  const shirtShade = cx.createLinearGradient(CX - 3, 0, CX + 3, 0);
+  shirtShade.addColorStop(0,   'rgba(160,150,130,0.30)');
+  shirtShade.addColorStop(0.5, 'rgba(0,0,0,0)');
+  shirtShade.addColorStop(1,   'rgba(160,150,130,0.30)');
+  cx.fillStyle = shirtShade;
+  cx.beginPath();
+  cx.moveTo(CX - 3, CY + 4);
+  cx.lineTo(CX,     CY + 20);
+  cx.lineTo(CX + 3, CY + 4);
+  cx.closePath();
+  cx.fill();
+
+  // ── Red tie — runs down the shirt opening ────────────────────────────────
   cx.fillStyle = '#dd0000';
   cx.beginPath();
-  cx.moveTo(CX - R * 0.26, CY + R * 0.72);   // top-left of knot
-  cx.lineTo(CX + R * 0.26, CY + R * 0.72);   // top-right of knot
-  cx.lineTo(CX + R * 0.32, CY + R * 1.05);   // right shoulder
-  cx.lineTo(CX + R * 0.14, CY + R * 1.55);   // blade narrows
-  cx.lineTo(CX,            CY + R * 1.90);   // pointed tip
-  cx.lineTo(CX - R * 0.14, CY + R * 1.55);
-  cx.lineTo(CX - R * 0.32, CY + R * 1.05);
+  cx.moveTo(CX - 2.5, CY + 5);    // knot top-left
+  cx.lineTo(CX + 2.5, CY + 5);    // knot top-right
+  cx.lineTo(CX + 3.2, CY + 10);   // blade widens slightly
+  cx.lineTo(CX + 2.0, CY + 20);   // blade
+  cx.lineTo(CX,       CY + 23);   // pointed tip (below shirt V)
+  cx.lineTo(CX - 2.0, CY + 20);
+  cx.lineTo(CX - 3.2, CY + 10);
   cx.closePath();
   cx.fill();
   // Tie highlight stripe
-  cx.fillStyle = 'rgba(255,80,80,0.40)';
+  cx.fillStyle = 'rgba(255,100,100,0.38)';
   cx.beginPath();
-  cx.moveTo(CX - R * 0.05, CY + R * 0.75);
-  cx.lineTo(CX + R * 0.05, CY + R * 0.75);
-  cx.lineTo(CX + R * 0.04, CY + R * 1.70);
-  cx.lineTo(CX - R * 0.04, CY + R * 1.70);
+  cx.moveTo(CX - 0.8, CY + 5.5);
+  cx.lineTo(CX + 0.8, CY + 5.5);
+  cx.lineTo(CX + 0.6, CY + 19);
+  cx.lineTo(CX - 0.6, CY + 19);
   cx.closePath();
   cx.fill();
 
-  // ── Hair — the single most recognizable feature ───────────────────────────
-  // Trump's comb-over: a thick golden-yellow mass that sweeps from the LEFT
-  // across the top and falls on the RIGHT side, with a front flip at the brow.
+  // ══ HAIR ══════════════════════════════════════════════════════════════════
 
-  // Back mass: wide oval swept right, sitting above and behind the face
+  // Back mass: wide sweep right, above and behind the face
   cx.fillStyle = '#f0c020';
   cx.beginPath();
-  cx.ellipse(CX + 1.5, CY - R * 0.78, R * 1.15, R * 0.65, -0.22, 0, Math.PI * 2);
+  cx.ellipse(CX + 2, CY - 7, 15, 8, -0.18, 0, Math.PI * 2);
   cx.fill();
 
-  // Right-side puff: spills beyond the face on the right
+  // Right-side puff: spills to the right beyond face
   cx.fillStyle = '#e8b818';
   cx.beginPath();
-  cx.ellipse(CX + R * 0.82, CY - R * 0.20, R * 0.42, R * 0.68, 0.25, 0, Math.PI * 2);
+  cx.ellipse(CX + 9, CY - 1, 5, 9, 0.22, 0, Math.PI * 2);
   cx.fill();
 
-  // Front flip: the famous forward-sweeping forelock
+  // Front forelock flip
   cx.fillStyle = '#f8d030';
   cx.beginPath();
-  cx.ellipse(CX - R * 0.10, CY - R * 0.52, R * 0.78, R * 0.38, 0.12, 0, Math.PI * 2);
+  cx.ellipse(CX - 1, CY - 5, 9, 4.5, 0.10, 0, Math.PI * 2);
   cx.fill();
 
-  // Hair highlight (catches the light on top)
-  const hairLight = cx.createRadialGradient(CX, CY - R * 1.0, 0, CX, CY - R * 0.7, R * 0.85);
-  hairLight.addColorStop(0,   'rgba(255,245,160,0.75)');
+  // Hair highlight
+  const hairLight = cx.createRadialGradient(CX, CY - 9, 0, CX, CY - 6, 12);
+  hairLight.addColorStop(0,   'rgba(255,248,165,0.78)');
   hairLight.addColorStop(0.6, 'rgba(240,195,20,0)');
   cx.fillStyle = hairLight;
   cx.beginPath();
-  cx.ellipse(CX + 0.5, CY - R * 0.80, R * 1.05, R * 0.58, -0.20, 0, Math.PI * 2);
+  cx.ellipse(CX + 1, CY - 7, 14, 7.5, -0.18, 0, Math.PI * 2);
   cx.fill();
 
-  // ── Face (clipped oval — slightly wider than tall for the squarish Trump face)
+  // ══ FACE ══════════════════════════════════════════════════════════════════
+
   cx.save();
   cx.beginPath();
-  cx.ellipse(CX, CY, R, R * 0.92, 0, 0, Math.PI * 2);
+  cx.ellipse(CX, CY, R, R * 0.93, 0, 0, Math.PI * 2);
   cx.clip();
 
-  // Deep orange skin — more saturated than a normal person
+  // Orange skin
   const skin = cx.createRadialGradient(CX - R * 0.28, CY - R * 0.28, 0, CX, CY, R);
   skin.addColorStop(0,    '#ffc070');
-  skin.addColorStop(0.40, '#f07028');   // very orange mid
-  skin.addColorStop(1,    '#c05010');   // deep orange rim
+  skin.addColorStop(0.40, '#f07028');
+  skin.addColorStop(1,    '#c05010');
   cx.fillStyle = skin;
   cx.fillRect(CX - R - 1, CY - R - 1, R * 2 + 2, R * 2 + 2);
 
-  // Jowl / heavy chin shadow
-  const jowl = cx.createLinearGradient(CX, CY + R * 0.28, CX, CY + R);
-  jowl.addColorStop(0, 'rgba(160,60,10,0)');
-  jowl.addColorStop(1, 'rgba(140,50,8,0.42)');
+  // Jowl shadow
+  const jowl = cx.createLinearGradient(CX, CY + R * 0.3, CX, CY + R);
+  jowl.addColorStop(0, 'rgba(160,55,8,0)');
+  jowl.addColorStop(1, 'rgba(140,48,6,0.44)');
   cx.fillStyle = jowl;
-  cx.fillRect(CX - R - 1, CY + R * 0.28, R * 2 + 2, R * 0.72);
+  cx.fillRect(CX - R - 1, CY + R * 0.3, R * 2 + 2, R * 0.7);
 
-  // ── Eyebrows — thick, angular, scowling (inner ends lower than outer) ─────
-  // Most distinctive facial expression feature.
-  cx.fillStyle = '#c07018';
-  cx.lineWidth = 0;
+  // Eyebrows — angular, scowling
+  cx.fillStyle = '#b86015';
   for (const sign of [-1, 1]) {
     const bx = CX + sign * R * 0.36;
-    const by = CY - R * 0.38;
-    // Filled angular brow shape — inner end (toward nose) droops down
+    const by = CY - R * 0.40;
     cx.beginPath();
-    cx.moveTo(bx - sign * R * 0.26, by + 0.8);  // outer top
-    cx.lineTo(bx + sign * R * 0.10, by + 2.2);  // inner bottom (drooped)
-    cx.lineTo(bx + sign * R * 0.10, by + 1.1);  // inner top
-    cx.lineTo(bx - sign * R * 0.26, by - 0.4);  // outer bottom
+    cx.moveTo(bx - sign * R * 0.27, by - 0.5);  // outer top
+    cx.lineTo(bx + sign * R * 0.10, by + 1.8);  // inner bottom (drooped)
+    cx.lineTo(bx + sign * R * 0.10, by + 0.8);  // inner top
+    cx.lineTo(bx - sign * R * 0.27, by + 0.6);  // outer bottom
     cx.closePath();
     cx.fill();
   }
 
-  // ── Eyes — small, narrow, slightly squinting ──────────────────────────────
-  const eyeY  = CY - R * 0.16;
+  // Eyes — narrow squinting ovals
+  const eyeY  = CY - R * 0.18;
   const eyeOX = R * 0.36;
   for (const sign of [-1, 1]) {
     const ex = CX + sign * eyeOX;
-    // White sclera (narrow horizontal oval — the squint)
     cx.fillStyle = '#ddd8cc';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.175, R * 0.085, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.175, R * 0.082, 0, 0, Math.PI * 2);
     cx.fill();
-    // Blue-grey iris
     cx.fillStyle = '#5577aa';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.085, R * 0.080, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.082, R * 0.078, 0, 0, Math.PI * 2);
     cx.fill();
-    // Pupil
     cx.fillStyle = '#0a0a0a';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.040, R * 0.040, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.038, R * 0.038, 0, 0, Math.PI * 2);
     cx.fill();
   }
 
-  // ── Nose — prominent, wide ────────────────────────────────────────────────
-  cx.fillStyle = 'rgba(175,75,15,0.38)';
+  // Nose
+  cx.fillStyle = 'rgba(175,72,14,0.36)';
   cx.beginPath();
-  cx.ellipse(CX, CY + R * 0.16, R * 0.155, R * 0.10, 0, 0, Math.PI * 2);
+  cx.ellipse(CX, CY + R * 0.16, R * 0.15, R * 0.10, 0, 0, Math.PI * 2);
   cx.fill();
 
-  // ── Mouth — the famous small pursed pout ─────────────────────────────────
-  // Upper lip line (thin, tight)
+  // Mouth — pursed pout
   cx.strokeStyle = '#c03010';
   cx.lineWidth   = 1.0;
   cx.lineCap     = 'round';
   cx.beginPath();
-  cx.moveTo(CX - R * 0.28, CY + R * 0.46);
-  cx.quadraticCurveTo(CX, CY + R * 0.40, CX + R * 0.28, CY + R * 0.46);
+  cx.moveTo(CX - R * 0.28, CY + R * 0.47);
+  cx.quadraticCurveTo(CX, CY + R * 0.40, CX + R * 0.28, CY + R * 0.47);
   cx.stroke();
-  // Lower lip — slightly pouty
   cx.strokeStyle = '#d04020';
   cx.lineWidth   = 1.3;
   cx.beginPath();
-  cx.moveTo(CX - R * 0.24, CY + R * 0.48);
-  cx.quadraticCurveTo(CX, CY + R * 0.62, CX + R * 0.24, CY + R * 0.48);
+  cx.moveTo(CX - R * 0.24, CY + R * 0.49);
+  cx.quadraticCurveTo(CX, CY + R * 0.64, CX + R * 0.24, CY + R * 0.49);
   cx.stroke();
 
   cx.restore();  // end face clip
 
-  // ── Shirt collar (white V-shape peeking above tie) ────────────────────────
-  cx.fillStyle = '#f0ede8';
+  // ── Neck (orange strip between face and collar) ───────────────────────────
+  cx.fillStyle = '#e06820';
   cx.beginPath();
-  cx.moveTo(CX - R * 0.28, CY + R * 0.70);
-  cx.lineTo(CX, CY + R * 0.88);
-  cx.lineTo(CX + R * 0.28, CY + R * 0.70);
-  cx.lineTo(CX + R * 0.18, CY + R * 0.70);
-  cx.lineTo(CX, CY + R * 0.82);
-  cx.lineTo(CX - R * 0.18, CY + R * 0.70);
-  cx.closePath();
+  cx.ellipse(CX, CY + R + 2, 4.5, 3.5, 0, 0, Math.PI * 2);
   cx.fill();
 
   if (foodSpriteCache.size >= MAX_SPRITE_CACHE) foodSpriteCache.delete(foodSpriteCache.keys().next().value);

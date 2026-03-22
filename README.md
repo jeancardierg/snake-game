@@ -20,7 +20,6 @@ A classic Snake game built with React, rendered on an HTML5 Canvas, and deployed
   - [Scoreboard.jsx](#scoreboardjsx)
   - [LevelBar.jsx](#levelbarju)
   - [Overlay.jsx](#overlayjsx)
-  - [DPad.jsx](#dpadjsx)
   - [index.css](#indexcss)
   - [main.jsx](#mainjsx)
   - [vite.config.js](#viteconfigjs)
@@ -36,11 +35,11 @@ A classic Snake game built with React, rendered on an HTML5 Canvas, and deployed
 
 | Action | Keyboard | Mobile |
 |--------|----------|--------|
-| Move | Arrow keys or WASD | D-Pad buttons |
+| Move | Arrow keys or WASD | Swipe in any direction |
 | Pause / Resume | `P` | Pause button |
 | Restart (after death) | `Enter` or `Space` | Play Again button |
 
-The snake starts moving as soon as you press a direction key.
+The snake starts moving as soon as you press a direction key or swipe.
 
 ---
 
@@ -53,7 +52,8 @@ The snake starts moving as soon as you press a direction key.
 - **Input queue** — up to 2 direction changes buffered per tick, so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
 - **Offscreen grid cache** — static grid drawn once and blit each frame for performance
-- **Touch D-Pad** — visible on mobile, hidden on desktop
+- **Swipe controls** — full-screen swipe gesture support on mobile
+- **Full-width mobile layout** — canvas fills the screen edge-to-edge on mobile
 - **Accessible** — ARIA labels, focus-visible styles, progressbar role on level bar
 
 ---
@@ -69,7 +69,6 @@ snake-react/
 │   └── favicon.svg             # Browser tab icon
 ├── src/
 │   ├── components/
-│   │   ├── DPad.jsx            # Touch directional pad for mobile
 │   │   ├── GameCanvas.jsx      # HTML5 Canvas renderer
 │   │   ├── LevelBar.jsx        # Progress bar to next level
 │   │   ├── Overlay.jsx         # Idle / Paused / Game Over screens
@@ -77,7 +76,6 @@ snake-react/
 │   ├── hooks/
 │   │   └── useSnake.js         # All game logic (single source of truth)
 │   ├── App.jsx                 # Root component — wires everything together
-│   ├── App.css                 # (reserved, currently empty)
 │   ├── constants.js            # Grid dimensions, level configs
 │   ├── index.css               # Global styles and layout
 │   └── main.jsx                # React entry point
@@ -104,11 +102,10 @@ App.jsx
   ├── <Scoreboard>        ← reads: score, best, levelIndex
   ├── <LevelBar>          ← reads: score, levelIndex
   ├── <GameCanvas>        ← reads: snake, food, levelIndex  →  draws to <canvas>
-  ├── <Overlay>           ← reads: state, score, levelIndex
-  └── <DPad>              ← calls: applyDir()
+  └── <Overlay>           ← reads: state, score, levelIndex
 ```
 
-**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, D-Pad, buttons) call the three action functions exported by the hook: `applyDir`, `pause`, `reset`.
+**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, buttons) call the three action functions exported by the hook: `applyDir`, `pause`, `reset`.
 
 **Why refs alongside state?**
 The game loop runs inside a `setInterval`. Because closures capture variables at creation time, a plain `useState` value inside the interval would always read its initial value (stale closure). Every piece of game state that the tick function needs to read or write is mirrored in a `useRef` so it's always current. React state is updated in parallel so the UI re-renders.
@@ -202,7 +199,7 @@ Clears any existing interval and starts a new one at the speed of `LEVELS[lvlIdx
 Clears the interval. Called on pause, death, reset, and component unmount.
 
 **`applyDir(newDir)`**
-Called by keyboard handler and D-Pad. Validates against the last queued direction (prevents 180° flip and duplicate inputs), then pushes to `dirQueueRef` (capped at 2). If the game is `idle`, transitions to `running` and starts the loop.
+Called by keyboard handler and swipe gesture handler. Validates against the last queued direction (prevents 180° flip and duplicate inputs), then pushes to `dirQueueRef` (capped at 2). If the game is `idle`, transitions to `running` and starts the loop.
 
 **`pause()`**
 Toggles between `running` ↔ `paused`. Stops/starts the interval accordingly.
@@ -233,7 +230,9 @@ useSnake() returns:
   applyDir, pause, reset                        → passed as callbacks to interactive components
 ```
 
-Also renders the controls hint bar (keyboard shortcut reminder + Pause and Reset buttons) between the canvas and the D-Pad.
+Swipe gesture detection runs here: `onTouchStart` records the finger's starting position, `onTouchEnd` computes the delta and calls `applyDir` based on the dominant axis. A 20px threshold filters out accidental micro-movements. `touchAction: 'none'` prevents the browser from scrolling or zooming while the player's finger is on the canvas.
+
+Also renders the controls hint bar (keyboard shortcut reminder + Pause and Reset buttons) below the canvas.
 
 ---
 
@@ -300,30 +299,11 @@ Renders a semi-transparent panel over the canvas for three non-running states:
 
 | `state` | Shows |
 |---------|-------|
-| `idle` | Title "SNAKE" + keyboard hints |
+| `idle` | Title "SNAKE" + swipe/keyboard hints |
 | `paused` | "PAUSED" + Resume button |
 | `dead` | "GAME OVER" + final score + Play Again button |
 
 Returns `null` when `state === 'running'` so nothing obscures the canvas during play.
-
----
-
-### `DPad.jsx`
-
-A cross-shaped directional pad for touch devices.
-
-**Touch handling:**
-Uses `onTouchEnd` (not `onTouchStart`) so the direction fires when the finger lifts, not when it first touches the screen — this prevents accidental input when swiping across the pad. A touch ID set (`handledTouches`) prevents the browser's synthetic `click` event from firing a second time after the touch event.
-
-**Layout:**
-Four `<button>` elements absolutely positioned within a 132×132px container:
-
-```
-      [▲]
-  [◄] [▼] [►]
-```
-
-The D-Pad is hidden on screens wider than 900px (keyboard assumed) via a CSS media query.
 
 ---
 
@@ -332,12 +312,12 @@ The D-Pad is hidden on screens wider than 900px (keyboard assumed) via a CSS med
 Global styles with a dark theme. Key sections:
 
 - **Body** — centered flex layout, `#0a0a0f` background
-- **`.app`** — vertical flex column, max-width 420px, centered
+- **`.app`** — vertical flex column, full width on mobile, max-width 420px on desktop (≥900px)
 - **`.scoreboard`** — horizontal flex, space-between, dark card
 - **`.level-bar-*`** — thin progress bar with animated fill
-- **`.canvas-wrap`** — `aspect-ratio: 1` container, `position: relative` for overlay positioning
+- **`.canvas-wrap`** — `aspect-ratio: 1` container, `position: relative` for overlay positioning, fills screen edge-to-edge on mobile
 - **`.overlay`** — `position: absolute; inset: 0` + `backdrop-filter: blur` for the game state screens
-- **`.ctrl-btn` / `.overlay-btn` / `.dpad-btn`** — all have `:focus-visible` outlines for keyboard navigation
+- **`.ctrl-btn` / `.overlay-btn`** — all have `:focus-visible` outlines for keyboard navigation
 - **Color contrast** — all muted text is `#777` or brighter on the `#0a0a0f` background to meet WCAG AA
 
 ---

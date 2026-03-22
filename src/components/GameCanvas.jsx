@@ -446,10 +446,10 @@ function buildTrumpSprite() {
   const key = `trump:${dpr}`;
   if (foodSpriteCache.has(key)) return foodSpriteCache.get(key);
 
-  const S  = CELL + FOOD_PAD * 2;   // logical sprite size (26×26)
-  const CX = S / 2;
-  const CY = S / 2;
-  const R  = FOOD_RADIUS;           // face circle radius (8)
+  const S  = CELL + FOOD_PAD * 2;   // 26×26 logical px
+  const CX = S / 2;                 // 13
+  const CY = S / 2 + 1;            // shifted down 1px — more room for hair above
+  const R  = FOOD_RADIUS + 1;      // bump face radius to 9 for more pixel real-estate
 
   const off = document.createElement('canvas');
   off.width  = S * dpr;
@@ -459,114 +459,163 @@ function buildTrumpSprite() {
   cx.scale(dpr, dpr);
 
   // ── Drop shadow ───────────────────────────────────────────────────────────
-  const shadow = cx.createRadialGradient(CX + 1.5, CY + 2, 0, CX + 1.5, CY + 2, R + 3);
-  shadow.addColorStop(0, 'rgba(0,0,0,0.50)');
+  const shadow = cx.createRadialGradient(CX + 1, CY + 2, 0, CX + 1, CY + 2, R + 3);
+  shadow.addColorStop(0, 'rgba(0,0,0,0.48)');
   shadow.addColorStop(1, 'rgba(0,0,0,0)');
   cx.fillStyle = shadow;
   cx.beginPath();
-  cx.arc(CX + 1.5, CY + 2, R + 4, 0, Math.PI * 2);
+  cx.arc(CX + 1, CY + 2, R + 4, 0, Math.PI * 2);
   cx.fill();
 
-  // ── Hair (behind face — drawn first) ─────────────────────────────────────
-  cx.fillStyle = '#f5c518';
+  // ── Red tie — drawn FIRST so it sits behind/below the face ────────────────
+  // Long wide tie is Trump's most iconic wardrobe item.
+  cx.fillStyle = '#dd0000';
   cx.beginPath();
-  cx.ellipse(CX - 0.5, CY - R * 0.55, R * 1.05, R * 0.75, -0.18, 0, Math.PI * 2);
+  cx.moveTo(CX - R * 0.26, CY + R * 0.72);   // top-left of knot
+  cx.lineTo(CX + R * 0.26, CY + R * 0.72);   // top-right of knot
+  cx.lineTo(CX + R * 0.32, CY + R * 1.05);   // right shoulder
+  cx.lineTo(CX + R * 0.14, CY + R * 1.55);   // blade narrows
+  cx.lineTo(CX,            CY + R * 1.90);   // pointed tip
+  cx.lineTo(CX - R * 0.14, CY + R * 1.55);
+  cx.lineTo(CX - R * 0.32, CY + R * 1.05);
+  cx.closePath();
   cx.fill();
-  // Lighter streak for volume
-  const hairGrad = cx.createRadialGradient(CX - 1, CY - R * 0.85, 0, CX - 1, CY - R * 0.55, R * 0.9);
-  hairGrad.addColorStop(0, 'rgba(255,235,120,0.85)');
-  hairGrad.addColorStop(1, 'rgba(200,150,10,0)');
-  cx.fillStyle = hairGrad;
+  // Tie highlight stripe
+  cx.fillStyle = 'rgba(255,80,80,0.40)';
   cx.beginPath();
-  cx.ellipse(CX - 1, CY - R * 0.7, R * 0.85, R * 0.60, -0.18, 0, Math.PI * 2);
+  cx.moveTo(CX - R * 0.05, CY + R * 0.75);
+  cx.lineTo(CX + R * 0.05, CY + R * 0.75);
+  cx.lineTo(CX + R * 0.04, CY + R * 1.70);
+  cx.lineTo(CX - R * 0.04, CY + R * 1.70);
+  cx.closePath();
   cx.fill();
 
-  // ── Face circle (clipped) ─────────────────────────────────────────────────
+  // ── Hair — the single most recognizable feature ───────────────────────────
+  // Trump's comb-over: a thick golden-yellow mass that sweeps from the LEFT
+  // across the top and falls on the RIGHT side, with a front flip at the brow.
+
+  // Back mass: wide oval swept right, sitting above and behind the face
+  cx.fillStyle = '#f0c020';
+  cx.beginPath();
+  cx.ellipse(CX + 1.5, CY - R * 0.78, R * 1.15, R * 0.65, -0.22, 0, Math.PI * 2);
+  cx.fill();
+
+  // Right-side puff: spills beyond the face on the right
+  cx.fillStyle = '#e8b818';
+  cx.beginPath();
+  cx.ellipse(CX + R * 0.82, CY - R * 0.20, R * 0.42, R * 0.68, 0.25, 0, Math.PI * 2);
+  cx.fill();
+
+  // Front flip: the famous forward-sweeping forelock
+  cx.fillStyle = '#f8d030';
+  cx.beginPath();
+  cx.ellipse(CX - R * 0.10, CY - R * 0.52, R * 0.78, R * 0.38, 0.12, 0, Math.PI * 2);
+  cx.fill();
+
+  // Hair highlight (catches the light on top)
+  const hairLight = cx.createRadialGradient(CX, CY - R * 1.0, 0, CX, CY - R * 0.7, R * 0.85);
+  hairLight.addColorStop(0,   'rgba(255,245,160,0.75)');
+  hairLight.addColorStop(0.6, 'rgba(240,195,20,0)');
+  cx.fillStyle = hairLight;
+  cx.beginPath();
+  cx.ellipse(CX + 0.5, CY - R * 0.80, R * 1.05, R * 0.58, -0.20, 0, Math.PI * 2);
+  cx.fill();
+
+  // ── Face (clipped oval — slightly wider than tall for the squarish Trump face)
   cx.save();
   cx.beginPath();
-  cx.arc(CX, CY, R, 0, Math.PI * 2);
+  cx.ellipse(CX, CY, R, R * 0.92, 0, 0, Math.PI * 2);
   cx.clip();
 
-  // Orange skin with radial gradient (lit from top-left)
-  const skin = cx.createRadialGradient(CX - R * 0.30, CY - R * 0.30, 0, CX, CY, R);
-  skin.addColorStop(0,    '#ffcc88');
-  skin.addColorStop(0.45, '#e8843a');
-  skin.addColorStop(1,    '#b85c18');
+  // Deep orange skin — more saturated than a normal person
+  const skin = cx.createRadialGradient(CX - R * 0.28, CY - R * 0.28, 0, CX, CY, R);
+  skin.addColorStop(0,    '#ffc070');
+  skin.addColorStop(0.40, '#f07028');   // very orange mid
+  skin.addColorStop(1,    '#c05010');   // deep orange rim
   cx.fillStyle = skin;
-  cx.fillRect(CX - R, CY - R, R * 2, R * 2);
+  cx.fillRect(CX - R - 1, CY - R - 1, R * 2 + 2, R * 2 + 2);
 
-  // Jowl shadow in the lower third
-  const jowl = cx.createLinearGradient(CX, CY + R * 0.35, CX, CY + R);
-  jowl.addColorStop(0, 'rgba(180,80,20,0)');
-  jowl.addColorStop(1, 'rgba(160,65,15,0.35)');
+  // Jowl / heavy chin shadow
+  const jowl = cx.createLinearGradient(CX, CY + R * 0.28, CX, CY + R);
+  jowl.addColorStop(0, 'rgba(160,60,10,0)');
+  jowl.addColorStop(1, 'rgba(140,50,8,0.42)');
   cx.fillStyle = jowl;
-  cx.fillRect(CX - R, CY + R * 0.35, R * 2, R * 0.65);
+  cx.fillRect(CX - R - 1, CY + R * 0.28, R * 2 + 2, R * 0.72);
 
-  // ── Eyes ──────────────────────────────────────────────────────────────────
-  const eyeY  = CY - R * 0.12;
-  const eyeOX = R * 0.35;
+  // ── Eyebrows — thick, angular, scowling (inner ends lower than outer) ─────
+  // Most distinctive facial expression feature.
+  cx.fillStyle = '#c07018';
+  cx.lineWidth = 0;
+  for (const sign of [-1, 1]) {
+    const bx = CX + sign * R * 0.36;
+    const by = CY - R * 0.38;
+    // Filled angular brow shape — inner end (toward nose) droops down
+    cx.beginPath();
+    cx.moveTo(bx - sign * R * 0.26, by + 0.8);  // outer top
+    cx.lineTo(bx + sign * R * 0.10, by + 2.2);  // inner bottom (drooped)
+    cx.lineTo(bx + sign * R * 0.10, by + 1.1);  // inner top
+    cx.lineTo(bx - sign * R * 0.26, by - 0.4);  // outer bottom
+    cx.closePath();
+    cx.fill();
+  }
+
+  // ── Eyes — small, narrow, slightly squinting ──────────────────────────────
+  const eyeY  = CY - R * 0.16;
+  const eyeOX = R * 0.36;
   for (const sign of [-1, 1]) {
     const ex = CX + sign * eyeOX;
-    cx.fillStyle = '#e8e0d0';
+    // White sclera (narrow horizontal oval — the squint)
+    cx.fillStyle = '#ddd8cc';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.165, R * 0.105, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.175, R * 0.085, 0, 0, Math.PI * 2);
     cx.fill();
-    cx.fillStyle = '#6688aa';
+    // Blue-grey iris
+    cx.fillStyle = '#5577aa';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.095, R * 0.095, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.085, R * 0.080, 0, 0, Math.PI * 2);
     cx.fill();
-    cx.fillStyle = '#111';
+    // Pupil
+    cx.fillStyle = '#0a0a0a';
     cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.045, R * 0.045, 0, 0, Math.PI * 2);
+    cx.ellipse(ex, eyeY, R * 0.040, R * 0.040, 0, 0, Math.PI * 2);
     cx.fill();
   }
 
-  // ── Brow ridges ───────────────────────────────────────────────────────────
-  cx.strokeStyle = '#a05818';
-  cx.lineWidth   = 0.9;
-  for (const sign of [-1, 1]) {
-    const bx = CX + sign * eyeOX;
-    cx.beginPath();
-    cx.arc(bx, eyeY - R * 0.16, R * 0.22, Math.PI + 0.35, Math.PI * 2 - 0.35);
-    cx.stroke();
-  }
-
-  // ── Nose ──────────────────────────────────────────────────────────────────
-  cx.fillStyle = 'rgba(160,75,20,0.30)';
+  // ── Nose — prominent, wide ────────────────────────────────────────────────
+  cx.fillStyle = 'rgba(175,75,15,0.38)';
   cx.beginPath();
-  cx.ellipse(CX, CY + R * 0.14, R * 0.10, R * 0.07, 0, 0, Math.PI * 2);
+  cx.ellipse(CX, CY + R * 0.16, R * 0.155, R * 0.10, 0, 0, Math.PI * 2);
   cx.fill();
 
-  // ── Pursed mouth ──────────────────────────────────────────────────────────
-  cx.strokeStyle = '#aa3311';
-  cx.lineWidth   = 1.1;
+  // ── Mouth — the famous small pursed pout ─────────────────────────────────
+  // Upper lip line (thin, tight)
+  cx.strokeStyle = '#c03010';
+  cx.lineWidth   = 1.0;
+  cx.lineCap     = 'round';
   cx.beginPath();
-  cx.arc(CX, CY + R * 0.44, R * 0.26, Math.PI + 0.45, Math.PI * 2 - 0.45);
+  cx.moveTo(CX - R * 0.28, CY + R * 0.46);
+  cx.quadraticCurveTo(CX, CY + R * 0.40, CX + R * 0.28, CY + R * 0.46);
   cx.stroke();
-  cx.strokeStyle = 'rgba(160,60,20,0.55)';
-  cx.lineWidth   = 0.7;
+  // Lower lip — slightly pouty
+  cx.strokeStyle = '#d04020';
+  cx.lineWidth   = 1.3;
   cx.beginPath();
-  cx.moveTo(CX - R * 0.22, CY + R * 0.37);
-  cx.lineTo(CX + R * 0.22, CY + R * 0.37);
+  cx.moveTo(CX - R * 0.24, CY + R * 0.48);
+  cx.quadraticCurveTo(CX, CY + R * 0.62, CX + R * 0.24, CY + R * 0.48);
   cx.stroke();
 
   cx.restore();  // end face clip
 
-  // ── Red tie (partially visible below face) ────────────────────────────────
-  cx.fillStyle = '#cc1111';
+  // ── Shirt collar (white V-shape peeking above tie) ────────────────────────
+  cx.fillStyle = '#f0ede8';
   cx.beginPath();
-  cx.moveTo(CX - R * 0.15, CY + R * 0.82);
-  cx.lineTo(CX + R * 0.15, CY + R * 0.82);
-  cx.lineTo(CX + R * 0.08, CY + R * 1.05);
-  cx.lineTo(CX,            CY + R * 1.18);
-  cx.lineTo(CX - R * 0.08, CY + R * 1.05);
+  cx.moveTo(CX - R * 0.28, CY + R * 0.70);
+  cx.lineTo(CX, CY + R * 0.88);
+  cx.lineTo(CX + R * 0.28, CY + R * 0.70);
+  cx.lineTo(CX + R * 0.18, CY + R * 0.70);
+  cx.lineTo(CX, CY + R * 0.82);
+  cx.lineTo(CX - R * 0.18, CY + R * 0.70);
   cx.closePath();
-  cx.fill();
-
-  // ── Specular sheen (top-left, subtle) ────────────────────────────────────
-  cx.fillStyle = 'rgba(255,255,255,0.22)';
-  cx.beginPath();
-  cx.ellipse(CX - R * 0.38, CY - R * 0.38, R * 0.20, R * 0.12, -0.42, 0, Math.PI * 2);
   cx.fill();
 
   if (foodSpriteCache.size >= MAX_SPRITE_CACHE) foodSpriteCache.delete(foodSpriteCache.keys().next().value);

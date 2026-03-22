@@ -12,22 +12,15 @@
  *     <GameCanvas> the game board
  *     <Overlay>    idle / paused / dead screens (absolute, over the canvas)
  *   controls-hint  keyboard shortcuts + Pause and Reset buttons
- *   <DPad>         touch directional pad (hidden on desktop)
  *
- * Touch controls (two complementary systems):
- *   Swipe — finger slides on the canvas-wrap; direction determined by the
- *            dominant axis (horizontal vs. vertical). Threshold: 20 px.
- *            touchAction:'none' prevents the browser from scrolling the page
- *            while the player is swiping on the board.
- *   D-Pad — discrete tap buttons below the board (visible only on mobile).
- *            Good for precise moves; swipe is better for quick direction changes.
+ * Touch controls: swipe on the canvas in any direction.
+ * touchAction:'none' prevents the browser from scrolling while swiping.
  */
 import { useRef, useCallback } from 'react';
 import { useSnake } from './hooks/useSnake';
 import { GameCanvas } from './components/GameCanvas';
 import { Scoreboard } from './components/Scoreboard';
 import { LevelBar } from './components/LevelBar';
-import { DPad } from './components/DPad';
 import { Overlay } from './components/Overlay';
 import { DIR } from './constants';
 import './index.css';
@@ -96,9 +89,6 @@ export default function App() {
           onReset={reset}
           onPause={pause}
         />
-        {/* D-Pad overlaid on canvas — semitransparent, bottom-center.
-            Hidden on desktop via CSS. */}
-        <DPad onDir={applyDir} />
       </div>
 
       {/* Keyboard hint + quick-action buttons */}

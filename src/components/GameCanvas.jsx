@@ -731,6 +731,14 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
 
   // ── Head interpolation ────────────────────────────────────────────────────
   if (headIdx !== anim.headIdx) {
+    // Measure tick interval to set interpolation duration proportionally
+    if (anim.lastTickMs !== null) {
+      const measured = now - anim.lastTickMs;
+      // 88% of tick interval: head reaches destination with ~1 frame to spare
+      anim.interpDuration = Math.min(Math.max(measured * 0.88, 40), 400);
+    }
+    anim.lastTickMs = now;
+
     if (anim.headIdx >= 0 && snakeLen > 1) {
       const oldHead = segPool[(headIdx + 1) % POOL_SIZE];
       anim.prevCell = { x: oldHead.x, y: oldHead.y };
@@ -744,7 +752,7 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
 
   const head    = segPool[headIdx % POOL_SIZE];
   const elapsed = now - anim.startMs;
-  const t       = Math.min(1, elapsed / 140);
+  const t       = Math.min(1, elapsed / anim.interpDuration);
 
   const dxRaw = head.x - anim.prevCell.x;
   const dyRaw = head.y - anim.prevCell.y;
@@ -771,12 +779,19 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
   const smokeSprite = buildSmokePuffSprite();
   for (let i = snakeLen - 1; i >= 1; i--) {
     const seg       = segPool[(headIdx + i) % POOL_SIZE];
-    const segAlpha  = Math.max(0.15, 1 - (i / snakeLen) * 0.88);
+    const segAlpha  = Math.max(0.28, 1 - (i / snakeLen) * 0.88);
     // Puffs closer to head are slightly larger (freshest smoke)
     const puffScale = 1.0 + 0.15 * (1 - i / snakeLen);
     const SW        = (CELL + 4) * puffScale;
     const sx        = seg.x * CELL + CELL / 2 - SW / 2;
     const sy        = seg.y * CELL + CELL / 2 - SW / 2;
+
+    // Dark shadow disc — ensures puff is visible against any background tone
+    ctx.globalAlpha = segAlpha * 0.50;
+    ctx.fillStyle   = 'rgba(15,15,25,1)';
+    ctx.beginPath();
+    ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2 + 2) * puffScale, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.globalAlpha = segAlpha;
     if (smokeSprite) ctx.drawImage(smokeSprite, sx, sy, SW, SW);
@@ -918,7 +933,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
   // dustParticles are initialized here once (Math.random values fixed at mount).
   const animRef = useRef({
     // Head interpolation
-    prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1,
+    prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1, lastTickMs: null, interpDuration: 270,
     // Eat / state detection
     prevFood: null, prevState: 'idle',
     // Active effects

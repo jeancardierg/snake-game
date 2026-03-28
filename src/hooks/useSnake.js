@@ -25,7 +25,7 @@
  *   non-canvas UI (Scoreboard, LevelBar, Overlay, buttons).
  */
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX } from '../constants';
+import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
@@ -109,8 +109,10 @@ export function useSnake() {
   const scoreRef    = useRef(0);
   const bestRef     = useRef(best);
   const levelRef    = useRef(0);
-  const intervalRef = useRef(null);
-  const stateRef    = useRef('idle');
+  const intervalRef       = useRef(null);
+  const stateRef          = useRef('idle');
+  const foodsThisLevelRef = useRef(0);                // foods eaten since last level-up / reset
+  const speedRef          = useRef(LEVELS[0].speed);  // live interval delay in ms
 
   // tickRef holds a reference to the latest tick callback.
   // startLoop's setInterval calls tickRef.current() instead of tick() directly.
@@ -125,12 +127,11 @@ export function useSnake() {
     }
   }, []);
 
-  const startLoop = useCallback((lvlIdx) => {
+  const startLoop = useCallback((lvlIdx, speed) => {
     stopLoop();
-    intervalRef.current = setInterval(
-      () => tickRef.current?.(),
-      LEVELS[lvlIdx ?? levelRef.current].speed
-    );
+    const ms = speed ?? LEVELS[lvlIdx ?? levelRef.current].speed;
+    speedRef.current    = ms;
+    intervalRef.current = setInterval(() => tickRef.current?.(), ms);
   }, [stopLoop]);
 
   // ── State machine actions ─────────────────────────────────────────────────────
@@ -207,13 +208,23 @@ export function useSnake() {
         try { localStorage.setItem('snakeBest', String(newScore)); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
       }
 
+      // Per-food speed boost: each food reduces the tick interval within the level
+      foodsThisLevelRef.current += 1;
+      const boostedSpeed = Math.max(
+        SPEED_FLOOR,
+        LEVELS[levelRef.current].speed - foodsThisLevelRef.current * SPEED_PER_FOOD
+      );
+
       // Level-up: while loop handles jumping past multiple thresholds at once
       let lvl = levelRef.current;
       while (lvl < LEVELS.length - 1 && newScore >= LEVELS[lvl].scoreNext) lvl++;
       if (lvl !== levelRef.current) {
         levelRef.current = lvl;
         setLevel(lvl);
-        startLoop(lvl);
+        foodsThisLevelRef.current = 0;  // reset per-food counter on level-up
+        startLoop(lvl);                 // restarts at new level's base speed
+      } else {
+        startLoop(undefined, boostedSpeed);  // apply per-food boost within level
       }
 
       // Spawn new food at a free cell.
@@ -279,7 +290,7 @@ export function useSnake() {
     } else if (stateRef.current === 'paused') {
       stateRef.current = 'running';
       setState('running');
-      startLoop(levelRef.current);
+      startLoop(undefined, speedRef.current);  // restore earned speed, not just base
     }
   }, [startLoop, stopLoop]);
 
@@ -305,9 +316,11 @@ export function useSnake() {
     } else {
       foodRef.current = initFood;
     }
-    scoreRef.current    = 0;
-    levelRef.current    = 0;
-    stateRef.current    = 'idle';
+    scoreRef.current          = 0;
+    levelRef.current          = 0;
+    stateRef.current          = 'idle';
+    foodsThisLevelRef.current = 0;
+    speedRef.current          = LEVELS[0].speed;
     setScore(0);
     setLevel(0);
     setState('idle');
@@ -353,7 +366,7 @@ export function useSnake() {
           autoPaused = false;
           stateRef.current = 'running';
           setState('running');
-          startLoop(levelRef.current);
+          startLoop(undefined, speedRef.current);  // restore earned speed on tab restore
         }
       }
     };

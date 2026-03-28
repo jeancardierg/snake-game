@@ -33,7 +33,6 @@ const SIZE = COLS * CELL;  // 400 × 400 logical pixels at default settings
 const FOOD_RADIUS = CELL / 2 - 2;               // 8  — food circle radius
 const FOOD_GLOW   = 14;                          // halo size around food
 const FOOD_TOTAL  = FOOD_RADIUS + FOOD_GLOW;     // 22
-const FOOD_PAD    = 5;                           // portrait sprite padding (sprite = CELL + 2*PAD = 30px)
 const HEAD_RADIUS = CELL / 2 - 1;               // 9  — head glow inner radius
 const HEAD_GLOW   = 10;                          // halo size around head
 const HEAD_TOTAL  = HEAD_RADIUS + HEAD_GLOW;     // 19
@@ -207,6 +206,7 @@ function getGridCanvas() {
 
 // ─── Sprite cache shared limit ───────────────────────────────────────────────
 const MAX_SPRITE_CACHE = 40;
+const FRUIT_GLOW_COLORS = ['#cc2020','#f07020','#e03050','#d0a800','#30c020','#8040c0'];
 
 // ─── Glow halo sprite cache ───────────────────────────────────────────────────
 const glowCache = new Map();
@@ -240,14 +240,13 @@ function buildGlowSprite(color, radius, glowSize) {
   return off;
 }
 
-// ─── Segment sprite caches (Missile + Smoke trail) ───────────────────────────
+// ─── Segment sprite caches (Snake head + body) ───────────────────────────────
 const segSpriteCache = new Map();
 
-// Body: (CELL+4)×(CELL+4) soft smoke puff — 2px padding so adjacent puffs
-// overlap by 2px each side, blending into a continuous trail.
-function buildSmokePuffSprite() {
+// Body segment: (CELL+4)×(CELL+4) green oval with belly stripe.
+function buildSnakeBodySprite() {
   const dpr = window.devicePixelRatio || 1;
-  const key = `smoke:${dpr}`;
+  const key = `snakebody:${dpr}`;
   if (segSpriteCache.has(key)) return segSpriteCache.get(key);
 
   const W  = CELL + 4;   // 24 logical px
@@ -261,24 +260,26 @@ function buildSmokePuffSprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // Soft grey-white smoke puff
-  const puff = cx.createRadialGradient(CR, CR, 0, CR, CR, r);
-  puff.addColorStop(0,    'rgba(210,212,220,0.82)');
-  puff.addColorStop(0.40, 'rgba(170,173,185,0.55)');
-  puff.addColorStop(0.75, 'rgba(130,133,145,0.28)');
-  puff.addColorStop(1,    'rgba(100,103,115,0)');
-  cx.fillStyle = puff;
+  // Green radial gradient body
+  const bodyGrad = cx.createRadialGradient(CR - 1, CR - 1, 0, CR, CR, r);
+  bodyGrad.addColorStop(0,    '#5a9a38');
+  bodyGrad.addColorStop(0.5,  '#4a7a2e');
+  bodyGrad.addColorStop(0.85, '#2d4a1e');
+  bodyGrad.addColorStop(1,    'rgba(20,36,12,0)');
+  cx.fillStyle = bodyGrad;
   cx.beginPath();
   cx.arc(CR, CR, r, 0, Math.PI * 2);
   cx.fill();
 
-  // Bright inner core (fresh smoke near the nozzle)
-  const core = cx.createRadialGradient(CR - 1.5, CR - 1.5, 0, CR, CR, r * 0.42);
-  core.addColorStop(0, 'rgba(245,246,252,0.42)');
-  core.addColorStop(1, 'rgba(0,0,0,0)');
-  cx.fillStyle = core;
+  // Belly stripe (pale cream centre line)
+  const bellyGrad = cx.createLinearGradient(CR - 3, CR, CR + 3, CR);
+  bellyGrad.addColorStop(0,   'rgba(232,221,184,0)');
+  bellyGrad.addColorStop(0.4, 'rgba(232,221,184,0.35)');
+  bellyGrad.addColorStop(0.6, 'rgba(232,221,184,0.35)');
+  bellyGrad.addColorStop(1,   'rgba(232,221,184,0)');
+  cx.fillStyle = bellyGrad;
   cx.beginPath();
-  cx.arc(CR, CR, r * 0.5, 0, Math.PI * 2);
+  cx.ellipse(CR, CR, 2.5, r * 0.85, 0, 0, Math.PI * 2);
   cx.fill();
 
   if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
@@ -286,16 +287,15 @@ function buildSmokePuffSprite() {
   return off;
 }
 
-// Missile head: CELL×CELL, designed pointing UP (nose tip at y=0).
+// Snake head: CELL×CELL, designed pointing UP (nose tip at y=0).
 // drawFrame rotates it to face the direction of movement.
-function buildMissileHeadSprite() {
+function buildSnakeHeadSprite() {
   const dpr = window.devicePixelRatio || 1;
-  const key = `missile:h:${dpr}`;
+  const key = `snakehead:${dpr}`;
   if (segSpriteCache.has(key)) return segSpriteCache.get(key);
 
   const C  = CELL;   // 20
   const HC = C / 2;  // 10
-  const BW = 3.5;    // body half-width
 
   const off = document.createElement('canvas');
   off.width  = C * dpr;
@@ -304,127 +304,87 @@ function buildMissileHeadSprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // ── Delta fins (drawn first — behind body) ────────────────────────────────
-  cx.fillStyle = '#7080a0';
-  // Left fin
+  // Hood flare (widest part, near neck)
+  const hoodGrad = cx.createLinearGradient(0, C * 0.4, 0, C * 0.9);
+  hoodGrad.addColorStop(0, '#3a6a20');
+  hoodGrad.addColorStop(1, '#2a4a14');
+  cx.fillStyle = hoodGrad;
   cx.beginPath();
-  cx.moveTo(HC - BW,     C * 0.66);
-  cx.lineTo(HC - BW - 5, C * 0.90);
-  cx.lineTo(HC - BW,     C * 0.94);
-  cx.closePath();
-  cx.fill();
-  // Right fin
-  cx.beginPath();
-  cx.moveTo(HC + BW,     C * 0.66);
-  cx.lineTo(HC + BW + 5, C * 0.90);
-  cx.lineTo(HC + BW,     C * 0.94);
-  cx.closePath();
-  cx.fill();
-  // Fin edge highlight
-  cx.strokeStyle = 'rgba(180,200,230,0.55)';
-  cx.lineWidth = 0.6;
-  cx.beginPath();
-  cx.moveTo(HC - BW, C * 0.66);
-  cx.lineTo(HC - BW - 5, C * 0.90);
-  cx.stroke();
-  cx.beginPath();
-  cx.moveTo(HC + BW, C * 0.66);
-  cx.lineTo(HC + BW + 5, C * 0.90);
-  cx.stroke();
-
-  // ── Body tube (metallic cylinder) ─────────────────────────────────────────
-  const bodyGrad = cx.createLinearGradient(HC - BW, 0, HC + BW, 0);
-  bodyGrad.addColorStop(0,    '#4a5060');
-  bodyGrad.addColorStop(0.28, '#b8c0d0');
-  bodyGrad.addColorStop(0.48, '#dce4f0');
-  bodyGrad.addColorStop(0.68, '#9098a8');
-  bodyGrad.addColorStop(1,    '#3a4050');
-  cx.fillStyle = bodyGrad;
-  cx.beginPath();
-  cx.rect(HC - BW, C * 0.20, BW * 2, C * 0.74);
+  cx.ellipse(HC, C * 0.65, HC * 0.90, C * 0.38, 0, 0, Math.PI * 2);
   cx.fill();
 
-  // Red warning band
-  cx.save();
+  // Head body (narrows from hood to snout tip)
+  const headGrad = cx.createLinearGradient(HC - 8, 0, HC + 8, 0);
+  headGrad.addColorStop(0,   '#2a4a14');
+  headGrad.addColorStop(0.5, '#4a7a2e');
+  headGrad.addColorStop(1,   '#2a4a14');
+  cx.fillStyle = headGrad;
   cx.beginPath();
-  cx.rect(HC - BW, C * 0.20, BW * 2, C * 0.74);
-  cx.clip();
-  cx.fillStyle = '#cc1818';
-  cx.fillRect(HC - BW, C * 0.48, BW * 2, C * 0.09);
-  // Thin highlight on band
-  cx.fillStyle = 'rgba(255,120,120,0.40)';
-  cx.fillRect(HC - BW, C * 0.48, BW * 2, C * 0.025);
-  cx.restore();
-
-  // Body highlight (left-lit sheen stripe)
-  cx.fillStyle = 'rgba(255,255,255,0.18)';
-  cx.fillRect(HC - BW + 0.8, C * 0.20, 1.6, C * 0.74);
-
-  // ── Nose cone (pointed tip at y=0) ────────────────────────────────────────
-  const noseGrad = cx.createLinearGradient(HC - BW, 0, HC + BW, 0);
-  noseGrad.addColorStop(0,    '#3a4050');
-  noseGrad.addColorStop(0.30, '#a8b2c4');
-  noseGrad.addColorStop(0.48, '#d0daea');
-  noseGrad.addColorStop(0.66, '#8090a2');
-  noseGrad.addColorStop(1,    '#2c3440');
-  cx.fillStyle = noseGrad;
-  cx.beginPath();
-  cx.moveTo(HC, 0);                                        // tip
-  cx.quadraticCurveTo(HC + BW + 1.5, C * 0.13, HC + BW, C * 0.22);
-  cx.lineTo(HC - BW, C * 0.22);
-  cx.quadraticCurveTo(HC - BW - 1.5, C * 0.13, HC, 0);
-  cx.closePath();
-  cx.fill();
-  // Nose specular highlight
-  cx.fillStyle = 'rgba(255,255,255,0.32)';
-  cx.beginPath();
-  cx.moveTo(HC, 1);
-  cx.quadraticCurveTo(HC + 1.8, C * 0.09, HC + BW * 0.55, C * 0.21);
-  cx.lineTo(HC + BW * 0.15, C * 0.21);
-  cx.quadraticCurveTo(HC + 0.5, C * 0.09, HC, 1);
+  cx.moveTo(HC, 0);  // nose tip
+  cx.bezierCurveTo(HC + 5, C * 0.18, HC + 8, C * 0.45, HC + 8, C * 0.68);
+  cx.lineTo(HC - 8, C * 0.68);
+  cx.bezierCurveTo(HC - 8, C * 0.45, HC - 5, C * 0.18, HC, 0);
   cx.closePath();
   cx.fill();
 
-  // ── Nozzle ring ───────────────────────────────────────────────────────────
-  cx.fillStyle = '#1e2228';
+  // Belly stripe (pale cream centre down the snout)
+  const bellyGrad = cx.createLinearGradient(HC - 3, 0, HC + 3, 0);
+  bellyGrad.addColorStop(0,   'rgba(232,221,184,0)');
+  bellyGrad.addColorStop(0.3, 'rgba(232,221,184,0.55)');
+  bellyGrad.addColorStop(0.7, 'rgba(232,221,184,0.55)');
+  bellyGrad.addColorStop(1,   'rgba(232,221,184,0)');
+  cx.fillStyle = bellyGrad;
   cx.beginPath();
-  cx.ellipse(HC, C * 0.93, BW + 1, 2.2, 0, 0, Math.PI * 2);
-  cx.fill();
-  cx.fillStyle = '#34383e';
-  cx.beginPath();
-  cx.ellipse(HC, C * 0.93, BW - 0.5, 1.4, 0, 0, Math.PI * 2);
+  cx.moveTo(HC, C * 0.05);
+  cx.bezierCurveTo(HC + 2.5, C * 0.22, HC + 2, C * 0.5, HC + 1.5, C * 0.68);
+  cx.lineTo(HC - 1.5, C * 0.68);
+  cx.bezierCurveTo(HC - 2, C * 0.5, HC - 2.5, C * 0.22, HC, C * 0.05);
+  cx.closePath();
   cx.fill();
 
-  // ── Exhaust glow (orange-white hot centre) ────────────────────────────────
-  const exhaust = cx.createRadialGradient(HC, C * 0.95, 0, HC, C * 0.95, 4.5);
-  exhaust.addColorStop(0,   'rgba(255,230,140,0.95)');
-  exhaust.addColorStop(0.35,'rgba(255,110,20,0.70)');
-  exhaust.addColorStop(0.70,'rgba(200,40,10,0.35)');
-  exhaust.addColorStop(1,   'rgba(150,20,5,0)');
-  cx.fillStyle = exhaust;
-  cx.beginPath();
-  cx.ellipse(HC, C * 0.95, 4.5, 3.5, 0, 0, Math.PI * 2);
-  cx.fill();
+  // Scale V-marks
+  cx.strokeStyle = 'rgba(20,40,10,0.55)';
+  cx.lineWidth   = 0.7;
+  cx.lineCap     = 'round';
+  for (let row = 0; row < 3; row++) {
+    const vy = C * (0.36 + row * 0.14);
+    const vw = 3.8 - row * 0.5;
+    cx.beginPath();
+    cx.moveTo(HC - vw, vy);
+    cx.lineTo(HC, vy + 1.5);
+    cx.lineTo(HC + vw, vy);
+    cx.stroke();
+  }
+
+  // Eyes: yellow ellipse + dark vertical slit
+  for (const s of [-1, 1]) {
+    const ex = HC + s * 3.8;
+    const ey = C * 0.27;
+    cx.fillStyle = '#d4b820';
+    cx.beginPath();
+    cx.ellipse(ex, ey, 2.4, 1.8, 0, 0, Math.PI * 2);
+    cx.fill();
+    cx.fillStyle = '#0a0a0a';
+    cx.beginPath();
+    cx.ellipse(ex, ey, 0.65, 1.6, 0, 0, Math.PI * 2);
+    cx.fill();
+  }
 
   if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
   segSpriteCache.set(key, off);
   return off;
 }
 
-// ─── Food sprite cache (Trump portrait — flat cartoon icon style) ─────────────
-// 30×30 px canvas (CELL=20 + FOOD_PAD*2=10). Peach skin, amber hair,
-// dark steel-blue suit, bold outline — matches compact avatar icon aesthetic.
-const foodSpriteCache = new Map();
+// ─── Fruit sprite cache (6 random fruits, each CELL×CELL) ────────────────────
+const fruitSpriteCache = new Map();
 
-function buildTrumpSprite() {
+function buildFruitSprite(type) {
   const dpr = window.devicePixelRatio || 1;
-  const key = `trump:${dpr}`;
-  if (foodSpriteCache.has(key)) return foodSpriteCache.get(key);
+  const key = `fruit:${type}:${dpr}`;
+  if (fruitSpriteCache.has(key)) return fruitSpriteCache.get(key);
 
-  const S  = CELL + FOOD_PAD * 2;   // 30 logical px
-  const CX = S / 2;                 // 15 — horizontal centre
-  const CY = 11;                    // face centre
-  const R  = 7;                     // face radius
+  const S  = CELL;   // 20 logical px
+  const HC = S / 2;  // 10
 
   const off = document.createElement('canvas');
   off.width  = S * dpr;
@@ -433,180 +393,109 @@ function buildTrumpSprite() {
   if (!cx) return null;
   cx.scale(dpr, dpr);
 
-  // ── 1. Dark outline blob (drawn behind everything) ────────────────────────
-  cx.fillStyle = 'rgba(28,22,16,0.88)';
-  // Head outline
-  cx.beginPath();
-  cx.ellipse(CX, CY, R + 2, R + 1.5, 0, 0, Math.PI * 2);
-  cx.fill();
-  // Suit outline
-  cx.beginPath();
-  cx.moveTo(CX - R - 3, S + 1);
-  cx.lineTo(CX + R + 3, S + 1);
-  cx.lineTo(CX + R + 3, CY + R - 2);
-  cx.lineTo(CX - R - 3, CY + R - 2);
-  cx.closePath();
-  cx.fill();
-
-  // ── 2. Suit body (dark steel-blue) ───────────────────────────────────────
-  cx.fillStyle = '#354566';
-  cx.beginPath();
-  cx.moveTo(CX - R - 2, S + 1);
-  cx.lineTo(CX + R + 2, S + 1);
-  cx.lineTo(CX + R + 2, CY + R - 1);
-  cx.lineTo(CX - R - 2, CY + R - 1);
-  cx.closePath();
-  cx.fill();
-
-  // ── 3. Hair (amber-blonde, behind face) ───────────────────────────────────
-  // Back hair mass (wide, sweeping right — the comb-over)
-  cx.fillStyle = '#c89030';
-  cx.beginPath();
-  cx.ellipse(CX + 1, CY - 4, R + 1.5, R * 0.72, -0.12, 0, Math.PI * 2);
-  cx.fill();
-  // Left side hair (flows down past ear)
-  cx.beginPath();
-  cx.ellipse(CX - R + 0.5, CY + 1, 3, R * 0.62, 0.25, 0, Math.PI * 2);
-  cx.fill();
-  // Right side hair (slight puff)
-  cx.beginPath();
-  cx.ellipse(CX + R - 0.5, CY + 1, 3.5, R * 0.65, -0.20, 0, Math.PI * 2);
-  cx.fill();
-  // Forelock highlight (slightly lighter)
-  cx.fillStyle = '#d8a838';
-  cx.beginPath();
-  cx.ellipse(CX, CY - 7, R * 0.72, 3, -0.10, 0, Math.PI * 2);
-  cx.fill();
-
-  // ── 4. Face (peach skin) ──────────────────────────────────────────────────
-  cx.fillStyle = '#f0c8a8';
-  cx.beginPath();
-  cx.ellipse(CX, CY, R, R * 0.90, 0, 0, Math.PI * 2);
-  cx.fill();
-  // Subtle cheek warmth
-  cx.fillStyle = 'rgba(220,140,90,0.22)';
-  for (const sign of [-1, 1]) {
-    cx.beginPath();
-    cx.ellipse(CX + sign * R * 0.52, CY + R * 0.18, R * 0.28, R * 0.18, 0, 0, Math.PI * 2);
-    cx.fill();
+  switch (type) {
+    case 0: {  // Apple — red with two lobes, stem, leaf
+      const g = cx.createRadialGradient(HC - 2, HC - 1, 1, HC, HC + 1, 9);
+      g.addColorStop(0, '#f05050');
+      g.addColorStop(0.6, '#d42020');
+      g.addColorStop(1, '#a01010');
+      cx.fillStyle = g;
+      // Two-lobe silhouette
+      cx.beginPath(); cx.arc(HC - 2.5, HC - 4, 4, 0, Math.PI * 2); cx.fill();
+      cx.beginPath(); cx.arc(HC + 2.5, HC - 4, 4, 0, Math.PI * 2); cx.fill();
+      cx.beginPath(); cx.arc(HC, HC + 2, 7, 0, Math.PI * 2);       cx.fill();
+      // Stem
+      cx.strokeStyle = '#5a3010'; cx.lineWidth = 1.2; cx.lineCap = 'round';
+      cx.beginPath(); cx.moveTo(HC, HC - 7); cx.lineTo(HC + 1, HC - 10); cx.stroke();
+      // Leaf
+      cx.fillStyle = '#30a020';
+      cx.beginPath(); cx.ellipse(HC + 3, HC - 9, 3, 1.4, -0.6, 0, Math.PI * 2); cx.fill();
+      break;
+    }
+    case 1: {  // Orange — gradient sphere with navel
+      const g = cx.createRadialGradient(HC - 2, HC - 2, 1, HC, HC, 9);
+      g.addColorStop(0, '#ffb050'); g.addColorStop(0.6, '#f07020'); g.addColorStop(1, '#c05010');
+      cx.fillStyle = g;
+      cx.beginPath(); cx.arc(HC, HC, 8.5, 0, Math.PI * 2); cx.fill();
+      // Navel
+      cx.fillStyle = 'rgba(160,60,0,0.35)';
+      cx.beginPath(); cx.arc(HC + 2, HC + 1, 1.5, 0, Math.PI * 2); cx.fill();
+      // Stem nub
+      cx.fillStyle = '#5a6020';
+      cx.beginPath(); cx.arc(HC, HC - 8, 1.5, 0, Math.PI * 2); cx.fill();
+      break;
+    }
+    case 2: {  // Strawberry — heart body with seeds + leaves
+      cx.fillStyle = '#e02040';
+      cx.beginPath(); cx.arc(HC - 2.5, HC - 2, 4.5, 0, Math.PI * 2); cx.fill();
+      cx.beginPath(); cx.arc(HC + 2.5, HC - 2, 4.5, 0, Math.PI * 2); cx.fill();
+      cx.beginPath();
+      cx.moveTo(HC - 6.5, HC - 1); cx.lineTo(HC, HC + 8); cx.lineTo(HC + 6.5, HC - 1);
+      cx.closePath(); cx.fill();
+      // Seeds
+      cx.fillStyle = '#fff0d0';
+      for (const [sx, sy] of [[-2,-1],[2,-1],[0,2],[-3,2],[3,2],[0,5]]) {
+        cx.beginPath(); cx.arc(HC + sx, HC + sy, 0.8, 0, Math.PI * 2); cx.fill();
+      }
+      // Leaves
+      cx.fillStyle = '#30a020';
+      for (const [lx, ly, la] of [[-2,-6,-0.5],[0,-7.5,0],[2,-6,0.5]]) {
+        cx.beginPath(); cx.ellipse(HC + lx, HC + ly, 1.2, 2.5, la, 0, Math.PI * 2); cx.fill();
+      }
+      break;
+    }
+    case 3: {  // Banana — yellow crescent
+      cx.strokeStyle = '#f0c010'; cx.lineWidth = 5; cx.lineCap = 'round';
+      cx.beginPath();
+      cx.moveTo(HC - 7, HC + 5);
+      cx.quadraticCurveTo(HC + 2, HC - 10, HC + 8, HC + 4);
+      cx.stroke();
+      // Dark edge
+      cx.strokeStyle = '#c08000'; cx.lineWidth = 1.2;
+      cx.beginPath();
+      cx.moveTo(HC - 7, HC + 5);
+      cx.quadraticCurveTo(HC + 2, HC - 10, HC + 8, HC + 4);
+      cx.stroke();
+      // Inner highlight
+      cx.strokeStyle = 'rgba(255,240,170,0.65)'; cx.lineWidth = 1.5;
+      cx.beginPath();
+      cx.moveTo(HC - 5, HC + 4);
+      cx.quadraticCurveTo(HC + 2, HC - 7, HC + 6, HC + 3);
+      cx.stroke();
+      break;
+    }
+    case 4: {  // Watermelon slice — top-half arc view
+      // Green rind
+      cx.fillStyle = '#30a020';
+      cx.beginPath(); cx.arc(HC, HC + 1, 9, Math.PI, 0); cx.closePath(); cx.fill();
+      // White rind
+      cx.fillStyle = '#f0f0e0';
+      cx.beginPath(); cx.arc(HC, HC + 1, 7.5, Math.PI, 0); cx.closePath(); cx.fill();
+      // Red flesh
+      cx.fillStyle = '#e02040';
+      cx.beginPath(); cx.arc(HC, HC + 1, 6.5, Math.PI, 0); cx.closePath(); cx.fill();
+      // Seeds
+      cx.fillStyle = '#1a1010';
+      for (const [sx, sy] of [[-3,-1],[0,-3],[3,-1],[-1.5,-4],[1.5,-4]]) {
+        cx.beginPath(); cx.ellipse(HC + sx, HC + sy, 0.8, 1.2, 0.3, 0, Math.PI * 2); cx.fill();
+      }
+      break;
+    }
+    case 5: {  // Grape — cluster of 6 purple circles
+      for (const [gx, gy] of [[-3.5,3],[3.5,3],[0,3],[-2.5,-1],[2.5,-1],[0,-5]]) {
+        const gg = cx.createRadialGradient(HC + gx - 0.8, HC + gy - 0.8, 0.5, HC + gx, HC + gy, 3.5);
+        gg.addColorStop(0, '#a060d0'); gg.addColorStop(0.6, '#7030a0'); gg.addColorStop(1, '#4a1a70');
+        cx.fillStyle = gg;
+        cx.beginPath(); cx.arc(HC + gx, HC + gy, 3.5, 0, Math.PI * 2); cx.fill();
+      }
+      // Stem
+      cx.strokeStyle = '#5a3010'; cx.lineWidth = 1; cx.lineCap = 'round';
+      cx.beginPath(); cx.moveTo(HC, HC - 8); cx.lineTo(HC + 2, HC - 10); cx.stroke();
+      break;
+    }
   }
 
-  // ── 5. White collar V ─────────────────────────────────────────────────────
-  cx.fillStyle = '#f5f2ee';
-  cx.beginPath();
-  cx.moveTo(CX - 4, CY + R - 1);
-  cx.lineTo(CX,     CY + R + 7);
-  cx.lineTo(CX + 4, CY + R - 1);
-  cx.closePath();
-  cx.fill();
-
-  // ── 6. Lapels (slightly lighter steel-blue fold) ──────────────────────────
-  cx.fillStyle = '#4a6082';
-  // Left lapel
-  cx.beginPath();
-  cx.moveTo(CX - 4, CY + R - 1);
-  cx.lineTo(CX - R - 2, CY + R - 1);
-  cx.lineTo(CX - 3,     CY + R + 5);
-  cx.closePath();
-  cx.fill();
-  // Right lapel
-  cx.beginPath();
-  cx.moveTo(CX + 4, CY + R - 1);
-  cx.lineTo(CX + R + 2, CY + R - 1);
-  cx.lineTo(CX + 3,     CY + R + 5);
-  cx.closePath();
-  cx.fill();
-
-  // ── 7. Red tie ────────────────────────────────────────────────────────────
-  cx.fillStyle = '#dd1010';
-  cx.beginPath();
-  cx.moveTo(CX - 2,   CY + R);
-  cx.lineTo(CX + 2,   CY + R);
-  cx.lineTo(CX + 2.5, CY + R + 6);
-  cx.lineTo(CX + 1.5, CY + R + 11);
-  cx.lineTo(CX,       CY + R + 13);
-  cx.lineTo(CX - 1.5, CY + R + 11);
-  cx.lineTo(CX - 2.5, CY + R + 6);
-  cx.closePath();
-  cx.fill();
-  // Tie highlight
-  cx.fillStyle = 'rgba(255,120,120,0.35)';
-  cx.beginPath();
-  cx.moveTo(CX - 0.7, CY + R + 0.5);
-  cx.lineTo(CX + 0.7, CY + R + 0.5);
-  cx.lineTo(CX + 0.5, CY + R + 10);
-  cx.lineTo(CX - 0.5, CY + R + 10);
-  cx.closePath();
-  cx.fill();
-
-  // ── 8. Face features ──────────────────────────────────────────────────────
-
-  // Eyebrows — thick, scowling amber-brown
-  cx.fillStyle = '#7a5012';
-  for (const sign of [-1, 1]) {
-    const bx = CX + sign * R * 0.38;
-    const by = CY - R * 0.38;
-    cx.beginPath();
-    cx.moveTo(bx - sign * R * 0.30, by - 0.5);   // outer (high)
-    cx.lineTo(bx + sign * R * 0.08, by + 1.6);   // inner (drooped scowl)
-    cx.lineTo(bx + sign * R * 0.08, by + 0.6);
-    cx.lineTo(bx - sign * R * 0.30, by + 0.5);
-    cx.closePath();
-    cx.fill();
-  }
-
-  // Eyes — small squinting ovals
-  const eyeY = CY - R * 0.15;
-  for (const sign of [-1, 1]) {
-    const ex = CX + sign * R * 0.37;
-    cx.fillStyle = '#d8d4c8';
-    cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.155, R * 0.072, 0, 0, Math.PI * 2);
-    cx.fill();
-    cx.fillStyle = '#33608a';
-    cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.075, R * 0.068, 0, 0, Math.PI * 2);
-    cx.fill();
-    cx.fillStyle = '#080808';
-    cx.beginPath();
-    cx.ellipse(ex, eyeY, R * 0.036, R * 0.036, 0, 0, Math.PI * 2);
-    cx.fill();
-  }
-
-  // Nose (small rounded bump)
-  cx.fillStyle = 'rgba(185,110,60,0.30)';
-  cx.beginPath();
-  cx.ellipse(CX, CY + R * 0.22, R * 0.14, R * 0.09, 0, 0, Math.PI * 2);
-  cx.fill();
-
-  // Mouth — tight pursed line + lower lip curve
-  cx.strokeStyle = '#904030';
-  cx.lineWidth   = 1.1;
-  cx.lineCap     = 'round';
-  cx.beginPath();
-  cx.moveTo(CX - R * 0.26, CY + R * 0.48);
-  cx.quadraticCurveTo(CX, CY + R * 0.42, CX + R * 0.26, CY + R * 0.48);
-  cx.stroke();
-  cx.strokeStyle = '#b04030';
-  cx.lineWidth   = 1.2;
-  cx.beginPath();
-  cx.moveTo(CX - R * 0.22, CY + R * 0.50);
-  cx.quadraticCurveTo(CX, CY + R * 0.64, CX + R * 0.22, CY + R * 0.50);
-  cx.stroke();
-
-  // ── 9. Tiny US flag pin on left lapel ────────────────────────────────────
-  const px = Math.round(CX - 6);
-  const py = Math.round(CY + R + 1);
-  cx.fillStyle = '#cc1122';
-  cx.fillRect(px, py, 4, 3);
-  cx.fillStyle = '#ffffff';
-  cx.fillRect(px, py + 1, 4, 1);
-  cx.fillStyle = '#1133cc';
-  cx.fillRect(px, py, 1.5, 3);
-
-  if (foodSpriteCache.size >= MAX_SPRITE_CACHE) foodSpriteCache.delete(foodSpriteCache.keys().next().value);
-  foodSpriteCache.set(key, off);
-  return off;
+  return cacheSet(fruitSpriteCache, key, off);
 }
 
 // ─── Frame renderer ───────────────────────────────────────────────────────────
@@ -760,50 +649,30 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
   const hxF   = skip ? head.x : anim.prevCell.x + dxRaw * t;
   const hyF   = skip ? head.y : anim.prevCell.y + dyRaw * t;
 
-  // ── Layer 2: food (Trump face) ────────────────────────────────────────────
+  // ── Layer 2: food (random fruit) ─────────────────────────────────────────
   const fx = food.x * CELL + CELL / 2;
   const fy = food.y * CELL + CELL / 2;
+  const fruitType = food.type ?? 0;
 
-  const foodGlow = buildGlowSprite('#ff8800', FOOD_RADIUS, FOOD_GLOW);
+  const foodGlow = buildGlowSprite(FRUIT_GLOW_COLORS[fruitType], FOOD_RADIUS, FOOD_GLOW);
   if (foodGlow) {
     ctx.globalAlpha = 0.45;
     ctx.drawImage(foodGlow, fx - FOOD_TOTAL, fy - FOOD_TOTAL, FOOD_TOTAL * 2, FOOD_TOTAL * 2);
     ctx.globalAlpha = 1;
   }
-  const foodSpr = buildTrumpSprite();
+  const foodSpr = buildFruitSprite(fruitType);
   if (foodSpr) {
     ctx.drawImage(foodSpr, food.x * CELL, food.y * CELL, CELL, CELL);
   }
 
-  // ── Layer 3: smoke trail (tail → neck, back-to-front) ────────────────────
-  const smokeSprite = buildSmokePuffSprite();
+  // ── Layer 3: snake body (tail → neck, back-to-front) ─────────────────────
+  const bodySprite = buildSnakeBodySprite();
+  const SW = CELL + 4;
   for (let i = snakeLen - 1; i >= 1; i--) {
-    const seg       = segPool[(headIdx + i) % POOL_SIZE];
-    const segAlpha  = Math.max(0.28, 1 - (i / snakeLen) * 0.88);
-    // Puffs closer to head are slightly larger (freshest smoke)
-    const puffScale = 1.0 + 0.15 * (1 - i / snakeLen);
-    const SW        = (CELL + 4) * puffScale;
-    const sx        = seg.x * CELL + CELL / 2 - SW / 2;
-    const sy        = seg.y * CELL + CELL / 2 - SW / 2;
-
-    // Dark shadow disc — ensures puff is visible against any background tone
-    ctx.globalAlpha = segAlpha * 0.50;
-    ctx.fillStyle   = 'rgba(15,15,25,1)';
-    ctx.beginPath();
-    ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2 + 2) * puffScale, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.globalAlpha = segAlpha;
-    if (smokeSprite) ctx.drawImage(smokeSprite, sx, sy, SW, SW);
-
-    // Level-color tint — ramps up from level 1 (subtle) to level 4 (noticeable)
-    if (levelIdx > 0) {
-      ctx.globalAlpha = segAlpha * Math.min(0.25, levelIdx * 0.06);
-      ctx.fillStyle   = levelColor;
-      ctx.beginPath();
-      ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2) * puffScale, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const seg = segPool[(headIdx + i) % POOL_SIZE];
+    const scx = seg.x * CELL + CELL / 2;
+    const scy = seg.y * CELL + CELL / 2;
+    if (bodySprite) ctx.drawImage(bodySprite, scx - SW / 2, scy - SW / 2, SW, SW);
   }
   ctx.globalAlpha = 1;
 
@@ -821,38 +690,42 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
   }
   const angle = Math.atan2(dirY, dirX) + Math.PI / 2;
 
-  // Static head-glow halo (cached sprite)
-  const headGlow = buildGlowSprite('#ff6010', HEAD_RADIUS, HEAD_GLOW);
+  // Static head-glow halo
+  const headGlow = buildGlowSprite('#40a020', HEAD_RADIUS, HEAD_GLOW);
   if (headGlow) {
-    ctx.globalAlpha = 0.60;
+    ctx.globalAlpha = 0.50;
     ctx.drawImage(headGlow, hcx - HEAD_TOTAL, hcy - HEAD_TOTAL, HEAD_TOTAL * 2, HEAD_TOTAL * 2);
     ctx.globalAlpha = 1;
   }
 
-  // Animated exhaust — flickering thruster glow drawn live each frame
-  // The nozzle is at the tail end of the missile (opposite direction of travel)
-  const exhaustPulse = 0.65 + 0.35 * Math.sin(now * 0.012);
-  const exR          = 5 + 1.8 * exhaustPulse;
-  const nozzleX      = hcx - dirX * CELL * 0.43;
-  const nozzleY      = hcy - dirY * CELL * 0.43;
-  const exGrad       = ctx.createRadialGradient(nozzleX, nozzleY, 0, nozzleX, nozzleY, exR * 2.4);
-  exGrad.addColorStop(0,    `rgba(255,230,140,${(0.95 * exhaustPulse).toFixed(2)})`);
-  exGrad.addColorStop(0.30, `rgba(255,110,20,${(0.70 * exhaustPulse).toFixed(2)})`);
-  exGrad.addColorStop(0.65, `rgba(200,40,10,${(0.35 * exhaustPulse).toFixed(2)})`);
-  exGrad.addColorStop(1,    'rgba(150,20,5,0)');
-  ctx.fillStyle = exGrad;
-  ctx.beginPath();
-  ctx.ellipse(nozzleX, nozzleY, exR * 2.4, exR * 1.6, angle - Math.PI / 2, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Rotated missile head sprite
-  const headSprite = buildMissileHeadSprite();
+  // Rotated snake head sprite
+  const headSprite = buildSnakeHeadSprite();
   if (headSprite) {
     ctx.save();
     ctx.translate(hcx, hcy);
     ctx.rotate(angle);
     ctx.drawImage(headSprite, -CELL / 2, -CELL / 2, CELL, CELL);
     ctx.restore();
+  }
+
+  // Tongue flicker
+  const tongueOut = Math.sin(now * 0.010) > 0.2;
+  if (tongueOut) {
+    const tLen   = 4 + Math.sin(now * 0.022) * 1.5;
+    const mouthX = hcx + dirX * CELL * 0.46;
+    const mouthY = hcy + dirY * CELL * 0.46;
+    const perpX  = -dirY, perpY = dirX;
+    ctx.strokeStyle = '#e02020';
+    ctx.lineWidth   = 0.9;
+    ctx.lineCap     = 'round';
+    ctx.globalAlpha = 0.85;
+    for (const fork of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(mouthX, mouthY);
+      ctx.lineTo(mouthX + dirX * tLen + perpX * fork * 2, mouthY + dirY * tLen + perpY * fork * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   // ── Effects layer (drawn on top of everything) ────────────────────────────

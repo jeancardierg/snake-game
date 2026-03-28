@@ -84,7 +84,8 @@ function randomFood(headIdx, snakeLen) {
   }
 
   if (free.length === 0) return null;  // board full
-  return free[Math.floor(Math.random() * free.length)];
+  const cell = free[Math.floor(Math.random() * free.length)];
+  return { ...cell, type: Math.floor(Math.random() * 6) };
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -261,6 +262,14 @@ export function useSnake() {
   useLayoutEffect(() => { tickRef.current = tick; });
 
   const applyDir = useCallback((newDir) => {
+    // Any press starts the game from idle — must run before direction filters
+    // so that LEFT and RIGHT (filtered as 180°/same relative to INIT_DIR) still work.
+    if (stateRef.current === 'idle') {
+      stateRef.current = 'running';
+      setState('running');
+      startLoop(levelRef.current);
+    }
+
     const last = dirQueueRef.current.length > 0
       ? dirQueueRef.current[dirQueueRef.current.length - 1]
       : dirRef.current;
@@ -273,12 +282,6 @@ export function useSnake() {
     // and prevent queue bloat from rapid key-mashing.
     if (dirQueueRef.current.length < DIR_QUEUE_MAX) {
       dirQueueRef.current.push(newDir);
-    }
-
-    if (stateRef.current === 'idle') {
-      stateRef.current = 'running';
-      setState('running');
-      startLoop(levelRef.current);
     }
   }, [startLoop]);
 

@@ -38,7 +38,7 @@ export function Overlay({ state, score, levelIndex, onReset, onPause }) {
     return (
       <div className="overlay">
         <h2 className="overlay-title">PAUSED</h2>
-        <button className="overlay-btn" onClick={onPause}>Resume</button>
+        <button className="overlay-btn" onClick={onPause} style={{ background: level.color }}>Resume</button>
       </div>
     );
   }
@@ -47,12 +47,11 @@ export function Overlay({ state, score, levelIndex, onReset, onPause }) {
     return (
       <div className="overlay">
         <h2 className="overlay-title" style={{ color: '#ff4757' }}>GAME OVER</h2>
-        {/* Score tinted with the level color the player died on */}
         <p className="overlay-score">
           Score: <span style={{ color: level.color }}>{score}</span>
         </p>
         <p className="overlay-hint small">Level reached: {level.label}</p>
-        <button className="overlay-btn" onClick={onReset}>Play Again</button>
+        <button className="overlay-btn" onClick={onReset} style={{ background: level.color }}>Play Again</button>
         <p className="overlay-hint small">or press Enter / Space</p>
       </div>
     );

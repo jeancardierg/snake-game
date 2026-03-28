@@ -16,18 +16,26 @@
  * Touch controls: swipe on the canvas in any direction.
  * touchAction:'none' prevents the browser from scrolling while swiping.
  */
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { useSnake } from './hooks/useSnake';
 import { GameCanvas } from './components/GameCanvas';
 import { Scoreboard } from './components/Scoreboard';
 import { LevelBar } from './components/LevelBar';
 import { Overlay } from './components/Overlay';
+import { DPad } from './components/DPad';
 import { DIR, SWIPE_THRESHOLD } from './constants';
 import './index.css';
 
 export default function App() {
   // All game state and actions come from a single hook
   const { headIdxRef, snakeLenRef, foodRef, score, best, levelIndex, state, applyDir, pause, reset } = useSnake();
+
+  // Ref mirrors of state/score so GameCanvas rAF loop can read them without
+  // React re-renders. Updated synchronously after each render via useEffect.
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+  const scoreRef = useRef(score);
+  useEffect(() => { scoreRef.current = score; }, [score]);
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
   // Track where each touch started. Using a ref so the handlers are stable
@@ -78,7 +86,7 @@ export default function App() {
         onTouchEnd={handleSwipeEnd}
         style={{ touchAction: 'none' }}
       >
-        <GameCanvas headIdxRef={headIdxRef} snakeLenRef={snakeLenRef} foodRef={foodRef} levelIndex={levelIndex} />
+        <GameCanvas headIdxRef={headIdxRef} snakeLenRef={snakeLenRef} foodRef={foodRef} levelIndex={levelIndex} stateRef={stateRef} scoreRef={scoreRef} />
         <Overlay
           state={state}
           score={score}
@@ -87,6 +95,9 @@ export default function App() {
           onPause={pause}
         />
       </div>
+
+      {/* Mobile D-Pad (hidden on desktop via CSS media query) */}
+      <DPad onDir={applyDir} levelIndex={levelIndex} />
 
       {/* Keyboard hint + quick-action buttons */}
       <div className="controls-hint">

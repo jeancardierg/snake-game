@@ -42,7 +42,11 @@ export function LevelBar({ score, levelIndex }) {
         {/* Fill width animates via CSS transition */}
         <div
           className="level-bar-fill"
-          style={{ width: `${progress * 100}%`, background: level.color }}
+          style={{
+            width: `${progress * 100}%`,
+            background: level.color,
+            boxShadow: `0 0 6px ${level.color}`,
+          }}
         />
       </div>
 

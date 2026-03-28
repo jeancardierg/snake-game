@@ -12,24 +12,42 @@
  *   best        number  — all-time best score (from localStorage)
  *   levelIndex  number  — index into LEVELS for color and label
  */
+import { useState, useEffect, useRef } from 'react';
 import { LEVELS } from '../constants';
 
 export function Scoreboard({ score, best, levelIndex }) {
-  // Clamp explicitly (mirrors LevelBar) rather than relying on nullish coalesce.
   const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
   const level = LEVELS[safeIdx];
+
+  // flashKey increments on each score increase; changing the key remounts the
+  // span, restarting the CSS animation cleanly without extra state.
+  const [flashKey, setFlashKey] = useState(0);
+  const prevScoreRef = useRef(score);
+  useEffect(() => {
+    if (score > prevScoreRef.current) setFlashKey(k => k + 1);
+    prevScoreRef.current = score;
+  }, [score]);
+
   return (
     <div className="scoreboard">
       <div className="score-block">
         <span className="score-label">SCORE</span>
-        {/* Score colored with the current level's accent */}
-        <span className="score-value" style={{ color: level.color }}>{score}</span>
+        <span
+          key={flashKey}
+          className={`score-value${flashKey > 0 ? ' score-flash' : ''}`}
+          style={{ color: level.color }}
+        >
+          {score}
+        </span>
       </div>
 
-      {/* Level badge — tinted background (22 hex = ~13% opacity) + colored border */}
       <div
         className="level-badge"
-        style={{ background: level.color + '22', borderColor: level.color }}
+        style={{
+          background: level.color + '22',
+          borderColor: level.color,
+          boxShadow: `0 0 8px ${level.color}66`,
+        }}
       >
         {level.label}
       </div>

@@ -613,11 +613,20 @@ function buildTrumpSprite() {
 
 /**
  * Render one frame to `canvas`.
- * animRef holds inter-frame state for head interpolation:
- *   { prevCell:{x,y}, startMs:number, headIdx:number }
+ *
+ * animRef holds all inter-frame mutable state:
+ *   Head interpolation : prevCell, startMs, headIdx
+ *   Eat detection      : prevFood
+ *   State detection    : prevState
+ *   Effects            : particles[], scorePopups[], eatFlash, shake, dustParticles[]
+ *
+ * stateRef       — mirrors App state string for death-shake trigger
+ * scoreRef       — not currently read (score is always +10), kept for future use
+ * levelIndexRef  — mirrors levelIndex prop for level-color effects in rAF loop
  */
-function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
+function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, scoreRef, levelIndexRef) { // eslint-disable-line no-unused-vars
   const dpr = window.devicePixelRatio || 1;
+  const now = performance.now();
 
   if (canvas.width !== SIZE * dpr || canvas.height !== SIZE * dpr) {
     canvas.width  = SIZE * dpr;
@@ -626,46 +635,124 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+
+  const anim       = animRef.current;
+  const food       = foodRef.current;
+  const headIdx    = headIdxRef.current;
+  const snakeLen   = snakeLenRef.current;
+  const levelIdx   = levelIndexRef.current;
+  const levelColor = LEVELS[levelIdx]?.color ?? '#4ecca3';
+
+  // ── Detect food eat (food position change = food was consumed) ────────────
+  if (anim.prevFood === null) {
+    anim.prevFood = { x: food.x, y: food.y };
+  } else if (anim.prevFood.x !== food.x || anim.prevFood.y !== food.y) {
+    const oldFx = anim.prevFood.x * CELL + CELL / 2;
+    const oldFy = anim.prevFood.y * CELL + CELL / 2;
+
+    // Particle burst — 12 pieces radiating outward from eaten-food position
+    for (let i = 0; i < 12; i++) {
+      const a   = (i / 12) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const spd = 1.2 + Math.random() * 2;
+      anim.particles.push({
+        x: oldFx, y: oldFy,
+        vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+        r: 2 + Math.random() * 1.5,
+        color: levelColor,
+        startMs: now, duration: 500,
+      });
+    }
+
+    // Floating "+10" text rising from food position
+    anim.scorePopups.push({
+      x: oldFx, y: oldFy,
+      text: '+10',
+      color: levelColor,
+      startMs: now, duration: 700,
+    });
+
+    // Expanding ring flash at eaten-food position
+    anim.eatFlash = { x: oldFx, y: oldFy, color: levelColor, startMs: now, duration: 220 };
+
+    anim.prevFood = { x: food.x, y: food.y };
+  }
+
+  // ── Detect death → trigger screen shake ───────────────────────────────────
+  const currentState = stateRef.current;
+  if (currentState === 'dead' && anim.prevState !== 'dead') {
+    anim.shake = { startMs: now, duration: 500 };
+  }
+  anim.prevState = currentState;
+
+  // ── Compute screen shake offset ───────────────────────────────────────────
+  let shakeX = 0, shakeY = 0;
+  if (anim.shake) {
+    const st = (now - anim.shake.startMs) / anim.shake.duration;
+    if (st >= 1) {
+      anim.shake = null;
+    } else {
+      const amp = 6 * (1 - st);
+      shakeX = amp * Math.sin(st * 40);
+      shakeY = amp * Math.cos(st * 38);
+    }
+  }
+
+  // Apply DPR scale then shake translate (all drawing inside this block is offset)
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
 
   // ── Layer 1: floor ────────────────────────────────────────────────────────
   const grid = getGridCanvas();
-  if (!grid) return;
+  if (!grid) { ctx.restore(); return; }
   ctx.drawImage(grid, 0, 0, SIZE, SIZE);
 
-  const food     = foodRef.current;
-  const headIdx  = headIdxRef.current;
-  const snakeLen = snakeLenRef.current;
-  const anim     = animRef.current;
+  // ── Vignette — dark radial overlay to frame and add depth ────────────────
+  const vig = ctx.createRadialGradient(SIZE / 2, SIZE / 2, SIZE * 0.28, SIZE / 2, SIZE / 2, SIZE * 0.72);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // ── Ambient dust — faint drifting motes in the sky band ──────────────────
+  for (const d of anim.dustParticles) {
+    d.x += d.vx;
+    d.y += d.vy;
+    if (d.y > SIZE * 0.22) d.y = 0;
+    if (d.x < 0) d.x = SIZE;
+    if (d.x > SIZE) d.x = 0;
+    ctx.globalAlpha = d.alpha;
+    ctx.fillStyle = '#e8d4a0';
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 
   // ── Head interpolation ────────────────────────────────────────────────────
-  // When headIdx changes a tick occurred. Interpolate the head from its
-  // previous cell toward the current cell over ~140 ms for smooth movement.
   if (headIdx !== anim.headIdx) {
-    // Old head is now body[1] after prepend; save it as the start of the glide.
     if (anim.headIdx >= 0 && snakeLen > 1) {
       const oldHead = segPool[(headIdx + 1) % POOL_SIZE];
       anim.prevCell = { x: oldHead.x, y: oldHead.y };
     } else {
-      const cur = segPool[(headIdx) % POOL_SIZE];
+      const cur = segPool[headIdx % POOL_SIZE];
       anim.prevCell = { x: cur.x, y: cur.y };
     }
-    anim.startMs  = performance.now();
-    anim.headIdx  = headIdx;
+    anim.startMs = now;
+    anim.headIdx = headIdx;
   }
 
   const head    = segPool[headIdx % POOL_SIZE];
-  const elapsed = performance.now() - anim.startMs;
+  const elapsed = now - anim.startMs;
   const t       = Math.min(1, elapsed / 140);
 
-  // Skip interpolation if the snake wrapped around the grid edge
   const dxRaw = head.x - anim.prevCell.x;
   const dyRaw = head.y - anim.prevCell.y;
   const skip  = Math.abs(dxRaw) > 1 || Math.abs(dyRaw) > 1;
   const hxF   = skip ? head.x : anim.prevCell.x + dxRaw * t;
   const hyF   = skip ? head.y : anim.prevCell.y + dyRaw * t;
 
-  // ── Layer 2: food (Trump face) — fills full grid cell ────────────────────
+  // ── Layer 2: food (Trump face) ────────────────────────────────────────────
   const fx = food.x * CELL + CELL / 2;
   const fy = food.y * CELL + CELL / 2;
 
@@ -680,22 +767,46 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
     ctx.drawImage(foodSpr, food.x * CELL, food.y * CELL, CELL, CELL);
   }
 
-  // ── Layer 3: smoke trail (tail → neck, drawn back-to-front) ─────────────
+  // ── Layer 3: smoke trail (tail → neck, back-to-front) ────────────────────
   const smokeSprite = buildSmokePuffSprite();
-  const SW = CELL + 4;  // smoke sprite logical size (oversized for overlap/blending)
   for (let i = snakeLen - 1; i >= 1; i--) {
-    const seg   = segPool[(headIdx + i) % POOL_SIZE];
-    const alpha = Math.max(0.15, 1 - (i / snakeLen) * 0.88);
-    ctx.globalAlpha = alpha;
-    if (smokeSprite) ctx.drawImage(smokeSprite, seg.x * CELL - 2, seg.y * CELL - 2, SW, SW);
+    const seg       = segPool[(headIdx + i) % POOL_SIZE];
+    const segAlpha  = Math.max(0.15, 1 - (i / snakeLen) * 0.88);
+    // Puffs closer to head are slightly larger (freshest smoke)
+    const puffScale = 1.0 + 0.15 * (1 - i / snakeLen);
+    const SW        = (CELL + 4) * puffScale;
+    const sx        = seg.x * CELL + CELL / 2 - SW / 2;
+    const sy        = seg.y * CELL + CELL / 2 - SW / 2;
+
+    ctx.globalAlpha = segAlpha;
+    if (smokeSprite) ctx.drawImage(smokeSprite, sx, sy, SW, SW);
+
+    // Level-color tint — ramps up from level 1 (subtle) to level 4 (noticeable)
+    if (levelIdx > 0) {
+      ctx.globalAlpha = segAlpha * Math.min(0.25, levelIdx * 0.06);
+      ctx.fillStyle   = levelColor;
+      ctx.beginPath();
+      ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2) * puffScale, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 
-  // ── Layer 4: exhaust glow + rotated missile sprite ────────────────────────
+  // ── Layer 4: head ─────────────────────────────────────────────────────────
   const hcx = hxF * CELL + CELL / 2;
   const hcy = hyF * CELL + CELL / 2;
 
-  // Orange-red exhaust glow behind the nozzle
+  let dirX = 0, dirY = -1;
+  if (snakeLen > 1) {
+    const neck = segPool[(headIdx + 1) % POOL_SIZE];
+    const rx   = head.x - neck.x;
+    const ry   = head.y - neck.y;
+    dirX = Math.abs(rx) > 1 ? -Math.sign(rx) : rx;
+    dirY = Math.abs(ry) > 1 ? -Math.sign(ry) : ry;
+  }
+  const angle = Math.atan2(dirY, dirX) + Math.PI / 2;
+
+  // Static head-glow halo (cached sprite)
   const headGlow = buildGlowSprite('#ff6010', HEAD_RADIUS, HEAD_GLOW);
   if (headGlow) {
     ctx.globalAlpha = 0.60;
@@ -703,21 +814,23 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
     ctx.globalAlpha = 1;
   }
 
-  // Derive movement direction from head → neck vector
-  let dirX = 0, dirY = -1;   // default: face up on first frame
-  if (snakeLen > 1) {
-    const neck = segPool[(headIdx + 1) % POOL_SIZE];
-    const rx   = head.x - neck.x;
-    const ry   = head.y - neck.y;
-    dirX = Math.abs(rx) > 1 ? -Math.sign(rx) : rx;  // un-wrap grid edge
-    dirY = Math.abs(ry) > 1 ? -Math.sign(ry) : ry;
-  }
+  // Animated exhaust — flickering thruster glow drawn live each frame
+  // The nozzle is at the tail end of the missile (opposite direction of travel)
+  const exhaustPulse = 0.65 + 0.35 * Math.sin(now * 0.012);
+  const exR          = 5 + 1.8 * exhaustPulse;
+  const nozzleX      = hcx - dirX * CELL * 0.43;
+  const nozzleY      = hcy - dirY * CELL * 0.43;
+  const exGrad       = ctx.createRadialGradient(nozzleX, nozzleY, 0, nozzleX, nozzleY, exR * 2.4);
+  exGrad.addColorStop(0,    `rgba(255,230,140,${(0.95 * exhaustPulse).toFixed(2)})`);
+  exGrad.addColorStop(0.30, `rgba(255,110,20,${(0.70 * exhaustPulse).toFixed(2)})`);
+  exGrad.addColorStop(0.65, `rgba(200,40,10,${(0.35 * exhaustPulse).toFixed(2)})`);
+  exGrad.addColorStop(1,    'rgba(150,20,5,0)');
+  ctx.fillStyle = exGrad;
+  ctx.beginPath();
+  ctx.ellipse(nozzleX, nozzleY, exR * 2.4, exR * 1.6, angle - Math.PI / 2, 0, Math.PI * 2);
+  ctx.fill();
 
-  // Sprite is designed pointing UP (nose tip at y=0).
-  // atan2(dy,dx): right=0, down=π/2, left=±π, up=-π/2.
-  // Adding π/2 maps "right" → 90° CW, which rotates the up-sprite to point right. ✓
-  const angle = Math.atan2(dirY, dirX) + Math.PI / 2;
-
+  // Rotated missile head sprite
   const headSprite = buildMissileHeadSprite();
   if (headSprite) {
     ctx.save();
@@ -726,6 +839,60 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
     ctx.drawImage(headSprite, -CELL / 2, -CELL / 2, CELL, CELL);
     ctx.restore();
   }
+
+  // ── Effects layer (drawn on top of everything) ────────────────────────────
+
+  // Eat flash ring — expanding circle that fades out
+  if (anim.eatFlash) {
+    const ft = (now - anim.eatFlash.startMs) / anim.eatFlash.duration;
+    if (ft >= 1) {
+      anim.eatFlash = null;
+    } else {
+      ctx.globalAlpha = 0.7 * (1 - ft);
+      ctx.strokeStyle = anim.eatFlash.color;
+      ctx.lineWidth   = 2.5;
+      ctx.beginPath();
+      ctx.arc(anim.eatFlash.x, anim.eatFlash.y, 10 + 12 * ft, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth   = 1;
+    }
+  }
+
+  // Particles — drawn and mutated in-place; expired ones are removed
+  anim.particles = anim.particles.filter(p => {
+    const pt = (now - p.startMs) / p.duration;
+    if (pt >= 1) return false;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.06;  // light gravity
+    ctx.globalAlpha = (1 - pt) * 0.9;
+    ctx.fillStyle   = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * (1 - pt * 0.6), 0, Math.PI * 2);
+    ctx.fill();
+    return true;
+  });
+  ctx.globalAlpha = 1;
+
+  // Score pop-ups — float upward and fade
+  anim.scorePopups = anim.scorePopups.filter(sp => {
+    const st = (now - sp.startMs) / sp.duration;
+    if (st >= 1) return false;
+    const sa = st < 0.25 ? 1 : 1 - (st - 0.25) / 0.75;
+    ctx.globalAlpha  = sa;
+    ctx.fillStyle    = sp.color;
+    ctx.font         = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sp.text, sp.x, sp.y - 30 * st);
+    return true;
+  });
+  ctx.globalAlpha  = 1;
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.restore();  // end shake translate
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -735,28 +902,49 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef) {
  *   headIdxRef  MutableRefObject<number>   — pool head index from useSnake
  *   snakeLenRef MutableRefObject<number>   — live segment count from useSnake
  *   foodRef     MutableRefObject<{x,y}>    — food position from useSnake
- *   levelIndex  number                     — selects the border accent color
+ *   levelIndex  number                     — selects border accent color + effect colors
+ *   stateRef    MutableRefObject<string>   — mirrors game state for death-shake trigger
+ *   scoreRef    MutableRefObject<number>   — mirrors score (reserved for future effects)
  */
-export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex }) {
+export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, stateRef, scoreRef }) {
   const canvasRef = useRef(null);
   const color     = LEVELS[levelIndex]?.color ?? '#4ecca3';
 
-  // Mutable interpolation state — lives outside React state to avoid re-renders.
-  const animRef = useRef({ prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1 });
+  // levelIndexRef lets drawFrame read the latest levelIndex without restarting the loop
+  const levelIndexRef = useRef(levelIndex);
+  useEffect(() => { levelIndexRef.current = levelIndex; }, [levelIndex]);
+
+  // All mutable per-frame state in one ref — avoids React state overhead on every tick.
+  // dustParticles are initialized here once (Math.random values fixed at mount).
+  const animRef = useRef({
+    // Head interpolation
+    prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1,
+    // Eat / state detection
+    prevFood: null, prevState: 'idle',
+    // Active effects
+    particles: [], scorePopups: [], eatFlash: null, shake: null,
+    // Ambient dust: 10 faint motes drifting through the sky band
+    dustParticles: Array.from({ length: 10 }, () => ({
+      x:     Math.random() * SIZE,
+      y:     Math.random() * SIZE * 0.22,
+      vx:    (Math.random() - 0.5) * 0.06,
+      vy:    0.02 + Math.random() * 0.04,
+      r:     0.8 + Math.random() * 1.2,
+      alpha: 0.04 + Math.random() * 0.06,
+    })),
+  });
 
   // rAF loop runs for the component's lifetime; all game data is read from refs.
   useEffect(() => {
     let rafId;
     let stopped = false;
     const loop = () => {
-      if (stopped) return;  // guard: stop scheduling after unmount or fatal error
+      if (stopped) return;
       const canvas = canvasRef.current;
       if (canvas) {
         try {
-          drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef);
+          drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, scoreRef, levelIndexRef);
         } catch (err) {
-          // ErrorBoundary will catch and display the error; stop the loop so it
-          // doesn't keep firing against a potentially dead canvas.
           console.error('[GameCanvas] drawFrame threw — stopping rAF loop:', err);
           stopped = true;
           return;

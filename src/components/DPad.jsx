@@ -13,7 +13,7 @@
  *   - onClick is kept so the D-Pad also works with mouse clicks.
  */
 import { useRef } from 'react';
-import { DIR } from '../constants';
+import { DIR, LEVELS } from '../constants';
 
 // Direction vectors imported from constants so there is a single source of truth.
 const DIRS = [
@@ -25,37 +25,40 @@ const DIRS = [
 
 /**
  * Props:
- *   onDir  function({x,y})  — called with the chosen direction vector
+ *   onDir       function({x,y})  — called with the chosen direction vector
+ *   levelIndex  number           — used to tint the D-Pad accent color per level
  */
-export function DPad({ onDir }) {
-  // Set of touch identifiers currently being handled.
-  // Prevents the synthesized 'click' event that browsers fire after touchend
-  // from triggering onDir a second time on the same tap.
+export function DPad({ onDir, levelIndex }) {
   const handledTouches = useRef(new Set());
+  const safeIdx = Math.min(Math.max(levelIndex ?? 0, 0), LEVELS.length - 1);
+  const level   = LEVELS[safeIdx];
 
   const handleTouchEnd = (dir) => (e) => {
-    e.preventDefault();  // suppress the synthetic click that follows touchend
+    e.preventDefault();
     const id = e.changedTouches[0]?.identifier;
     if (id !== undefined) {
-      if (handledTouches.current.has(id)) return;  // already processed
+      if (handledTouches.current.has(id)) return;
       handledTouches.current.add(id);
-      // Remove from set after a short window so the ID can be reused later
       setTimeout(() => handledTouches.current.delete(id), 300);
     }
     onDir(dir);
   };
 
   return (
-    // aria-label identifies the group of buttons to screen readers
-    <div className="dpad" aria-label="Directional controls">
+    <div
+      className="dpad"
+      aria-label="Directional controls"
+      style={{ '--dpad-color': level.color }}
+    >
       {DIRS.map(({ label, dir, pos, ariaLabel }) => (
         <button
           key={pos}
           className={`dpad-btn dpad-${pos}`}
           onTouchEnd={handleTouchEnd(dir)}
           onTouchCancel={(e) => e.preventDefault()}
-          onClick={() => onDir(dir)}       // fallback for mouse / keyboard activation
-          aria-label={ariaLabel}           // e.g. "Move up" — clearer than bare "up"
+          onClick={() => onDir(dir)}
+          aria-label={ariaLabel}
+          style={{ borderColor: level.color + '55' }}
         >
           {label}
         </button>

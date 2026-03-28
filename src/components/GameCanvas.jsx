@@ -208,6 +208,12 @@ function getGridCanvas() {
 const MAX_SPRITE_CACHE = 40;
 const FRUIT_GLOW_COLORS = ['#cc2020','#f07020','#e03050','#d0a800','#30c020','#8040c0'];
 
+function cacheSet(cache, key, sprite) {
+  if (cache.size >= MAX_SPRITE_CACHE) cache.delete(cache.keys().next().value);
+  cache.set(key, sprite);
+  return sprite;
+}
+
 // ─── Glow halo sprite cache ───────────────────────────────────────────────────
 const glowCache = new Map();
 

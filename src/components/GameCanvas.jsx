@@ -781,7 +781,7 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
     const seg       = segPool[(headIdx + i) % POOL_SIZE];
     const segAlpha  = Math.max(0.28, 1 - (i / snakeLen) * 0.88);
     // Puffs closer to head are slightly larger (freshest smoke)
-    const puffScale = 1.0 + 0.15 * (1 - i / snakeLen);
+    const puffScale = 1.0 + 0.06 * (1 - i / snakeLen);
     const SW        = (CELL + 4) * puffScale;
     const sx        = seg.x * CELL + CELL / 2 - SW / 2;
     const sy        = seg.y * CELL + CELL / 2 - SW / 2;
@@ -790,19 +790,20 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
     ctx.globalAlpha = segAlpha * 0.50;
     ctx.fillStyle   = 'rgba(15,15,25,1)';
     ctx.beginPath();
-    ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2 + 2) * puffScale, 0, Math.PI * 2);
+    ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2 - 1) * puffScale, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.globalAlpha = segAlpha;
     if (smokeSprite) ctx.drawImage(smokeSprite, sx, sy, SW, SW);
 
-    // Level-color tint — ramps up from level 1 (subtle) to level 4 (noticeable)
-    if (levelIdx > 0) {
-      ctx.globalAlpha = segAlpha * Math.min(0.25, levelIdx * 0.06);
-      ctx.fillStyle   = levelColor;
-      ctx.beginPath();
-      ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2) * puffScale, 0, Math.PI * 2);
-      ctx.fill();
+    // Soft level-color glow halo — visible at all levels, fades toward tail
+    const trailGlowR = CELL / 2;
+    const trailGlowS = CELL / 2 + 4;
+    const trailGlow  = buildGlowSprite(levelColor, trailGlowR, trailGlowS);
+    if (trailGlow) {
+      const gt = trailGlowR + trailGlowS;
+      ctx.globalAlpha = segAlpha * 0.40;
+      ctx.drawImage(trailGlow, seg.x * CELL + CELL / 2 - gt, seg.y * CELL + CELL / 2 - gt, gt * 2, gt * 2);
     }
   }
   ctx.globalAlpha = 1;

@@ -51,16 +51,40 @@ function seededRand(seed) {
   return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
 }
 
+// Shared canvas creation — eliminates repeated boilerplate in sprite builders.
+function createOffscreenCanvas(w, h) {
+  const dpr = window.devicePixelRatio || 1;
+  const off = document.createElement('canvas');
+  off.width  = w * dpr;
+  off.height = h * dpr;
+  const ctx  = off.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(dpr, dpr);
+  return { off, ctx };
+}
+
+// LRU eviction + insert for sprite caches.
+function cacheSet(cache, key, sprite) {
+  if (cache.size >= MAX_SPRITE_CACHE) cache.delete(cache.keys().next().value);
+  cache.set(key, sprite);
+  return sprite;
+}
+
+// Three-harmonic sine ridge profile shared by ridge loop and snow-cap peaks.
+function ridgeY(x, ridge) {
+  return ridge.yBase
+    - Math.sin(x * ridge.freq + 0.8)        * ridge.amp
+    - Math.sin(x * ridge.freq * 2.3 + 2.1)  * ridge.amp * 0.42
+    - Math.sin(x * ridge.freq * 0.57 + 1.3) * ridge.amp * 0.28;
+}
+
 function getGridCanvas() {
   const dpr = window.devicePixelRatio || 1;
   if (gridCache && gridCacheDpr === dpr) return gridCache;
 
-  const off = document.createElement('canvas');
-  off.width  = SIZE * dpr;
-  off.height = SIZE * dpr;
-  const ctx  = off.getContext('2d');
-  if (!ctx) return null;
-  ctx.scale(dpr, dpr);
+  const result = createOffscreenCanvas(SIZE, SIZE);
+  if (!result) return null;
+  const { off, ctx } = result;
 
   const rand = seededRand(0xdeadbeef);
 
@@ -116,12 +140,7 @@ function getGridCanvas() {
     ctx.beginPath();
     ctx.moveTo(0, skyH);                      // start at desert horizon, left edge
     for (let x = 0; x <= SIZE; x += 2) {
-      // Stack three sine harmonics for natural-looking peaks
-      const y = ridge.yBase
-        - Math.sin(x * ridge.freq + 0.8)         * ridge.amp
-        - Math.sin(x * ridge.freq * 2.3 + 2.1)   * ridge.amp * 0.42
-        - Math.sin(x * ridge.freq * 0.57 + 1.3)  * ridge.amp * 0.28;
-      ctx.lineTo(x, Math.min(y, skyH));        // cap at horizon — peaks only in sky
+      ctx.lineTo(x, Math.min(ridgeY(x, ridge), skyH));
     }
     ctx.lineTo(SIZE, skyH);                   // end at desert horizon, right edge
     ctx.lineTo(SIZE, 0);                      // up to top-right corner
@@ -138,10 +157,7 @@ function getGridCanvas() {
   ctx.fillStyle   = '#f0f4f8';
   // Draw small white triangles at approximate peak locations
   for (const px of [60, 155, 265, 350]) {
-    const peakY = ridges[2].yBase
-      - Math.sin(px * 0.032 + 0.8)       * ridges[2].amp
-      - Math.sin(px * 0.074 + 2.1)       * ridges[2].amp * 0.42
-      - Math.sin(px * 0.018 + 1.3)       * ridges[2].amp * 0.28;
+    const peakY = ridgeY(px, ridges[2]);
     ctx.beginPath();
     ctx.moveTo(px,      peakY);
     ctx.lineTo(px - 7,  peakY + 10);
@@ -216,14 +232,10 @@ function buildGlowSprite(color, radius, glowSize) {
   const key   = `${color}:${radius}:${glowSize}:${dpr}`;
   if (glowCache.has(key)) return glowCache.get(key);
 
-  const total   = radius + glowSize;
-  const logical = total * 2;
-  const off     = document.createElement('canvas');
-  off.width     = logical * dpr;
-  off.height    = logical * dpr;
-  const cx      = off.getContext('2d');
-  if (!cx) return null;
-  cx.scale(dpr, dpr);
+  const total  = radius + glowSize;
+  const result = createOffscreenCanvas(total * 2, total * 2);
+  if (!result) return null;
+  const { off, ctx: cx } = result;
 
   const grad = cx.createRadialGradient(total, total, 0, total, total, total);
   grad.addColorStop(0,              color + 'cc');
@@ -235,9 +247,7 @@ function buildGlowSprite(color, radius, glowSize) {
   cx.arc(total, total, total, 0, Math.PI * 2);
   cx.fill();
 
-  if (glowCache.size >= MAX_SPRITE_CACHE) glowCache.delete(glowCache.keys().next().value);
-  glowCache.set(key, off);
-  return off;
+  return cacheSet(glowCache, key, off);
 }
 
 // ─── Segment sprite caches (Missile + Smoke trail) ───────────────────────────
@@ -254,12 +264,9 @@ function buildSmokePuffSprite() {
   const CR = W / 2;      // 12
   const r  = CELL / 2 + 0.8;
 
-  const off = document.createElement('canvas');
-  off.width  = W * dpr;
-  off.height = W * dpr;
-  const cx   = off.getContext('2d');
-  if (!cx) return null;
-  cx.scale(dpr, dpr);
+  const result = createOffscreenCanvas(W, W);
+  if (!result) return null;
+  const { off, ctx: cx } = result;
 
   // Soft grey-white smoke puff
   const puff = cx.createRadialGradient(CR, CR, 0, CR, CR, r);
@@ -281,9 +288,7 @@ function buildSmokePuffSprite() {
   cx.arc(CR, CR, r * 0.5, 0, Math.PI * 2);
   cx.fill();
 
-  if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
-  segSpriteCache.set(key, off);
-  return off;
+  return cacheSet(segSpriteCache, key, off);
 }
 
 // Missile head: CELL×CELL, designed pointing UP (nose tip at y=0).
@@ -297,40 +302,26 @@ function buildMissileHeadSprite() {
   const HC = C / 2;  // 10
   const BW = 3.5;    // body half-width
 
-  const off = document.createElement('canvas');
-  off.width  = C * dpr;
-  off.height = C * dpr;
-  const cx   = off.getContext('2d');
-  if (!cx) return null;
-  cx.scale(dpr, dpr);
+  const result = createOffscreenCanvas(C, C);
+  if (!result) return null;
+  const { off, ctx: cx } = result;
 
   // ── Delta fins (drawn first — behind body) ────────────────────────────────
-  cx.fillStyle = '#7080a0';
-  // Left fin
-  cx.beginPath();
-  cx.moveTo(HC - BW,     C * 0.66);
-  cx.lineTo(HC - BW - 5, C * 0.90);
-  cx.lineTo(HC - BW,     C * 0.94);
-  cx.closePath();
-  cx.fill();
-  // Right fin
-  cx.beginPath();
-  cx.moveTo(HC + BW,     C * 0.66);
-  cx.lineTo(HC + BW + 5, C * 0.90);
-  cx.lineTo(HC + BW,     C * 0.94);
-  cx.closePath();
-  cx.fill();
-  // Fin edge highlight
+  cx.fillStyle   = '#7080a0';
   cx.strokeStyle = 'rgba(180,200,230,0.55)';
-  cx.lineWidth = 0.6;
-  cx.beginPath();
-  cx.moveTo(HC - BW, C * 0.66);
-  cx.lineTo(HC - BW - 5, C * 0.90);
-  cx.stroke();
-  cx.beginPath();
-  cx.moveTo(HC + BW, C * 0.66);
-  cx.lineTo(HC + BW + 5, C * 0.90);
-  cx.stroke();
+  cx.lineWidth   = 0.6;
+  for (const s of [-1, 1]) {
+    cx.beginPath();
+    cx.moveTo(HC + s * BW,       C * 0.66);
+    cx.lineTo(HC + s * (BW + 5), C * 0.90);
+    cx.lineTo(HC + s * BW,       C * 0.94);
+    cx.closePath();
+    cx.fill();
+    cx.beginPath();
+    cx.moveTo(HC + s * BW,       C * 0.66);
+    cx.lineTo(HC + s * (BW + 5), C * 0.90);
+    cx.stroke();
+  }
 
   // ── Body tube (metallic cylinder) ─────────────────────────────────────────
   const bodyGrad = cx.createLinearGradient(HC - BW, 0, HC + BW, 0);
@@ -406,9 +397,7 @@ function buildMissileHeadSprite() {
   cx.ellipse(HC, C * 0.95, 4.5, 3.5, 0, 0, Math.PI * 2);
   cx.fill();
 
-  if (segSpriteCache.size >= MAX_SPRITE_CACHE) segSpriteCache.delete(segSpriteCache.keys().next().value);
-  segSpriteCache.set(key, off);
-  return off;
+  return cacheSet(segSpriteCache, key, off);
 }
 
 // ─── Food sprite cache (Trump portrait — flat cartoon icon style) ─────────────
@@ -426,12 +415,9 @@ function buildTrumpSprite() {
   const CY = 11;                    // face centre
   const R  = 7;                     // face radius
 
-  const off = document.createElement('canvas');
-  off.width  = S * dpr;
-  off.height = S * dpr;
-  const cx   = off.getContext('2d');
-  if (!cx) return null;
-  cx.scale(dpr, dpr);
+  const result = createOffscreenCanvas(S, S);
+  if (!result) return null;
+  const { off, ctx: cx } = result;
 
   // ── 1. Dark outline blob (drawn behind everything) ────────────────────────
   cx.fillStyle = 'rgba(28,22,16,0.88)';
@@ -502,20 +488,14 @@ function buildTrumpSprite() {
 
   // ── 6. Lapels (slightly lighter steel-blue fold) ──────────────────────────
   cx.fillStyle = '#4a6082';
-  // Left lapel
-  cx.beginPath();
-  cx.moveTo(CX - 4, CY + R - 1);
-  cx.lineTo(CX - R - 2, CY + R - 1);
-  cx.lineTo(CX - 3,     CY + R + 5);
-  cx.closePath();
-  cx.fill();
-  // Right lapel
-  cx.beginPath();
-  cx.moveTo(CX + 4, CY + R - 1);
-  cx.lineTo(CX + R + 2, CY + R - 1);
-  cx.lineTo(CX + 3,     CY + R + 5);
-  cx.closePath();
-  cx.fill();
+  for (const s of [-1, 1]) {
+    cx.beginPath();
+    cx.moveTo(CX + s * 4,       CY + R - 1);
+    cx.lineTo(CX + s * (R + 2), CY + R - 1);
+    cx.lineTo(CX + s * 3,       CY + R + 5);
+    cx.closePath();
+    cx.fill();
+  }
 
   // ── 7. Red tie ────────────────────────────────────────────────────────────
   cx.fillStyle = '#dd1010';
@@ -604,9 +584,7 @@ function buildTrumpSprite() {
   cx.fillStyle = '#1133cc';
   cx.fillRect(px, py, 1.5, 3);
 
-  if (foodSpriteCache.size >= MAX_SPRITE_CACHE) foodSpriteCache.delete(foodSpriteCache.keys().next().value);
-  foodSpriteCache.set(key, off);
-  return off;
+  return cacheSet(foodSpriteCache, key, off);
 }
 
 // ─── Frame renderer ───────────────────────────────────────────────────────────
@@ -777,33 +755,30 @@ function drawFrame(canvas, headIdxRef, snakeLenRef, foodRef, animRef, stateRef, 
 
   // ── Layer 3: smoke trail (tail → neck, back-to-front) ────────────────────
   const smokeSprite = buildSmokePuffSprite();
+  const trailGlow = buildGlowSprite(levelColor, CELL / 2, CELL / 2 + 4);
+  const trailGlowT = CELL - 1;  // total radius = CELL/2 + CELL/2+4 = 14
   for (let i = snakeLen - 1; i >= 1; i--) {
     const seg       = segPool[(headIdx + i) % POOL_SIZE];
+    const scx       = seg.x * CELL + CELL / 2;
+    const scy       = seg.y * CELL + CELL / 2;
     const segAlpha  = Math.max(0.28, 1 - (i / snakeLen) * 0.88);
-    // Puffs closer to head are slightly larger (freshest smoke)
     const puffScale = 1.0 + 0.06 * (1 - i / snakeLen);
     const SW        = (CELL + 4) * puffScale;
-    const sx        = seg.x * CELL + CELL / 2 - SW / 2;
-    const sy        = seg.y * CELL + CELL / 2 - SW / 2;
 
     // Dark shadow disc — ensures puff is visible against any background tone
     ctx.globalAlpha = segAlpha * 0.50;
     ctx.fillStyle   = 'rgba(15,15,25,1)';
     ctx.beginPath();
-    ctx.arc(seg.x * CELL + CELL / 2, seg.y * CELL + CELL / 2, (CELL / 2 - 1) * puffScale, 0, Math.PI * 2);
+    ctx.arc(scx, scy, (CELL / 2 - 1) * puffScale, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.globalAlpha = segAlpha;
-    if (smokeSprite) ctx.drawImage(smokeSprite, sx, sy, SW, SW);
+    if (smokeSprite) ctx.drawImage(smokeSprite, scx - SW / 2, scy - SW / 2, SW, SW);
 
     // Soft level-color glow halo — visible at all levels, fades toward tail
-    const trailGlowR = CELL / 2;
-    const trailGlowS = CELL / 2 + 4;
-    const trailGlow  = buildGlowSprite(levelColor, trailGlowR, trailGlowS);
     if (trailGlow) {
-      const gt = trailGlowR + trailGlowS;
       ctx.globalAlpha = segAlpha * 0.40;
-      ctx.drawImage(trailGlow, seg.x * CELL + CELL / 2 - gt, seg.y * CELL + CELL / 2 - gt, gt * 2, gt * 2);
+      ctx.drawImage(trailGlow, scx - trailGlowT, scy - trailGlowT, trailGlowT * 2, trailGlowT * 2);
     }
   }
   ctx.globalAlpha = 1;

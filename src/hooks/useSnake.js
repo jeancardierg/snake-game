@@ -84,7 +84,8 @@ function randomFood(headIdx, snakeLen) {
   }
 
   if (free.length === 0) return null;  // board full
-  return free[Math.floor(Math.random() * free.length)];
+  const cell = free[Math.floor(Math.random() * free.length)];
+  return { ...cell, type: Math.floor(Math.random() * 6) };
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────

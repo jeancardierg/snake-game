@@ -1,6 +1,6 @@
 # Snake — React + Vite
 
-A classic Snake game built with React, rendered on an HTML5 Canvas, and deployed automatically to GitHub Pages via GitHub Actions.
+A classic Snake game built with React, rendered with a **three.js WebGL** engine, and deployed automatically to GitHub Pages via GitHub Actions.
 
 **Live demo:** https://jeancardierg.github.io/snake-game/
 
@@ -14,9 +14,11 @@ A classic Snake game built with React, rendered on an HTML5 Canvas, and deployed
 - [Architecture Overview](#architecture-overview)
 - [File-by-File Reference](#file-by-file-reference)
   - [constants.js](#constantsjs)
+  - [pool.js](#pooljs)
   - [useSnake.js](#usesnakejs)
   - [App.jsx](#appjsx)
   - [GameCanvas.jsx](#gamecanvasjsx)
+  - [DPad.jsx](#dpadjsx)
   - [Scoreboard.jsx](#scoreboardjsx)
   - [LevelBar.jsx](#levelbarju)
   - [Overlay.jsx](#overlayjsx)
@@ -33,28 +35,32 @@ A classic Snake game built with React, rendered on an HTML5 Canvas, and deployed
 
 ## How to Play
 
-| Action | Keyboard | Mobile |
-|--------|----------|--------|
-| Move | Arrow keys or WASD | Swipe in any direction |
-| Pause / Resume | `P` | Pause button |
-| Restart (after death) | `Enter` or `Space` | Play Again button |
+| Action | Keyboard | Mobile (touch) | Mobile (D-Pad) |
+|--------|----------|----------------|----------------|
+| Move | Arrow keys or WASD | Swipe in any direction | On-screen D-Pad buttons |
+| Pause / Resume | `P` | Pause button | Pause button |
+| Restart (after death) | `Enter` or `Space` | Play Again button | Play Again button |
 
-The snake starts moving as soon as you press a direction key or swipe.
+The snake starts moving as soon as you press a direction key, swipe, or tap a D-Pad button.
 
 ---
 
 ## Features
 
+- **3D WebGL rendering** — Phong-shaded sphere segments with real-time shadows, directional sun + ambient lighting, and a desert ground plane
 - **5 progressive speed levels** — EASY → MEDIUM → FAST → HYPER → INSANE
+- **Per-food speed boost** — each food eaten within a level shaves 8 ms off the tick interval, up to a hard floor of 40 ms
 - **Automatic level-up** based on score thresholds
+- **6 random fruit types** — each food spawn picks a random fruit (apple, orange, strawberry, banana, watermelon, grape); colour-matched particles burst on eat
 - **Best score** saved in `localStorage` across sessions
-- **Retina/high-DPI rendering** — canvas scaled by `devicePixelRatio` for crisp pixels on all screens
+- **Retina/high-DPI rendering** — WebGL pixel ratio set to `devicePixelRatio` for crisp output on all screens
 - **Input queue** — up to 2 direction changes buffered per tick, so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
-- **Offscreen grid cache** — static grid drawn once and blit each frame for performance
-- **Swipe controls** — full-screen swipe gesture support on mobile
+- **On-screen D-Pad** — 4-button directional pad for mobile, fires on pointer-down (zero latency)
+- **Swipe controls** — full-screen swipe gesture support on mobile (20 px threshold)
 - **Full-width mobile layout** — canvas fills the screen edge-to-edge on mobile
-- **Accessible** — ARIA labels, focus-visible styles, progressbar role on level bar
+- **Content Security Policy** — CSP meta tag blocks inline scripts and external resources
+- **Accessible** — ARIA labels on D-Pad buttons and canvas, `role="progressbar"` on level bar, focus-visible styles
 
 ---
 
@@ -64,22 +70,25 @@ The snake starts moving as soon as you press a direction key or swipe.
 snake-react/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml          # Auto-deploy to GitHub Pages on push
+│       └── deploy.yml          # Auto-deploy to GitHub Pages on push to master
 ├── public/
 │   └── favicon.svg             # Browser tab icon
 ├── src/
 │   ├── components/
-│   │   ├── GameCanvas.jsx      # HTML5 Canvas renderer
+│   │   ├── DPad.jsx            # On-screen directional pad (mobile)
+│   │   ├── ErrorBoundary.jsx   # React error boundary wrapping the canvas
+│   │   ├── GameCanvas.jsx      # WebGL renderer (three.js)
 │   │   ├── LevelBar.jsx        # Progress bar to next level
 │   │   ├── Overlay.jsx         # Idle / Paused / Game Over screens
 │   │   └── Scoreboard.jsx      # Score, best score, level badge
 │   ├── hooks/
 │   │   └── useSnake.js         # All game logic (single source of truth)
 │   ├── App.jsx                 # Root component — wires everything together
-│   ├── constants.js            # Grid dimensions, level configs
+│   ├── constants.js            # Grid dimensions, level configs, input constants
 │   ├── index.css               # Global styles and layout
-│   └── main.jsx                # React entry point
-├── index.html                  # HTML shell
+│   ├── main.jsx                # React entry point
+│   └── pool.js                 # Circular ring-buffer for zero-allocation segments
+├── index.html                  # HTML shell (includes CSP meta tag)
 ├── vite.config.js              # Vite build config
 └── package.json
 ```
@@ -92,8 +101,9 @@ snake-react/
 App.jsx
   │
   ├── useSnake()          ← all state + logic lives here
-  │     ├── snake[]       ← array of {x,y} segments
-  │     ├── food {x,y}    ← current food position
+  │     ├── headIdxRef    ← head index into the shared segment ring buffer
+  │     ├── snakeLenRef   ← live segment count
+  │     ├── foodRef       ← current food {x, y, type}
   │     ├── score         ← current score
   │     ├── best          ← all-time best (localStorage)
   │     ├── levelIndex    ← current level (0–4)
@@ -101,14 +111,18 @@ App.jsx
   │
   ├── <Scoreboard>        ← reads: score, best, levelIndex
   ├── <LevelBar>          ← reads: score, levelIndex
-  ├── <GameCanvas>        ← reads: snake, food, levelIndex  →  draws to <canvas>
+  ├── <GameCanvas>        ← reads refs: headIdxRef, snakeLenRef, foodRef → renders via WebGL
+  ├── <DPad>              ← calls: applyDir
   └── <Overlay>           ← reads: state, score, levelIndex
 ```
 
-**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, buttons) call the three action functions exported by the hook: `applyDir`, `pause`, `reset`.
+**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, D-Pad buttons) call the three action functions exported by the hook: `applyDir`, `pause`, `reset`.
 
 **Why refs alongside state?**
 The game loop runs inside a `setInterval`. Because closures capture variables at creation time, a plain `useState` value inside the interval would always read its initial value (stale closure). Every piece of game state that the tick function needs to read or write is mirrored in a `useRef` so it's always current. React state is updated in parallel so the UI re-renders.
+
+**Why a ring buffer?**
+The snake can be up to 100 segments long and the game loop runs up to ~25 times per second at INSANE speed. Prepending to a JavaScript array every tick causes O(n) memory moves and GC pressure. The ring buffer (`pool.js`) pre-allocates all 100 segment objects once and mutates them in-place — zero allocation per tick regardless of snake length or speed.
 
 ---
 
@@ -116,45 +130,67 @@ The game loop runs inside a `setInterval`. Because closures capture variables at
 
 ### `constants.js`
 
-Defines every magic number in one place. Import from here instead of hardcoding values in components.
+Defines every magic number in one place.
 
 ```js
-COLS = 20        // grid width in cells
-ROWS = 20        // grid height in cells
-CELL = 20        // pixel size of each cell (logical pixels)
+COLS = 10          // grid width in cells
+ROWS = 10          // grid height in cells
+CELL = 20          // pixel size of each cell (logical pixels)
+SPEED_PER_FOOD = 8 // ms subtracted from tick interval per food eaten within a level
+SPEED_FLOOR = 40   // minimum tick interval in ms (hard cap)
+DIR_QUEUE_MAX = 2  // maximum buffered direction changes
+SWIPE_THRESHOLD = 20  // minimum swipe travel in pixels
 ```
 
-`LEVELS` is an array of 5 objects, one per speed tier:
+`LEVELS` is an array of 5 objects:
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | `label` | string | Display name (EASY, MEDIUM, …) |
-| `speed` | number | Tick interval in milliseconds |
+| `speed` | number | Base tick interval in ms (lower = faster) |
 | `scoreNext` | number | Score needed to advance to the next level |
-| `color` | string | Hex color used for the snake and UI accents at this level |
+| `color` | string | Hex accent color used for UI elements at this level |
 
-`DIR` is a convenience object of pre-built direction vectors (`UP`, `DOWN`, `LEFT`, `RIGHT`). Not used directly in the game loop but handy for tests or extensions.
+`DIR` is a convenience object of pre-built direction vectors (`UP`, `DOWN`, `LEFT`, `RIGHT`).
+
+---
+
+### `pool.js`
+
+Pre-allocates `POOL_SIZE = COLS × ROWS = 100` `{x, y}` objects as a circular ring buffer.
+
+| Export | Description |
+|--------|-------------|
+| `segPool` | Shared array of 100 segment objects — read by `GameCanvas`, written by `useSnake` |
+| `POOL_SIZE` | Constant 100 — maximum possible snake length |
+| `initPool(segments)` | Writes an initial segment array head-first; returns `headIdx = 0` |
+| `poolPrepend(headIdx, x, y)` | Writes a new head at `(headIdx − 1) % POOL_SIZE` in O(1); returns new `headIdx` |
+| `poolGet(headIdx, i)` | Returns segment at logical index `i` (0 = head) |
+
+`GameCanvas` reads `segPool` directly on every animation frame without triggering any React re-render.
 
 ---
 
 ### `useSnake.js`
 
-**The entire game engine.** This single custom hook contains all state, all refs, all game logic, and all side effects. No component outside this hook ever modifies game state directly.
+**The entire game engine.** This single custom hook contains all state, all refs, all game logic, and all side effects.
 
 #### State and refs
 
 | Name | Type | Purpose |
 |------|------|---------|
-| `snake` / `snakeRef` | `{x,y}[]` | Ordered list of segments, head first |
-| `food` / `foodRef` | `{x,y}` | Current food cell |
+| `headIdxRef` | `number` | Index of the head segment in `segPool` |
+| `snakeLenRef` | `number` | Current live segment count |
+| `foodRef` | `{x,y,type}` | Current food cell + fruit type (0–5) |
 | `score` / `scoreRef` | `number` | Current score (10 pts per food) |
 | `best` / `bestRef` | `number` | All-time best, persisted in `localStorage` |
 | `levelIndex` / `levelRef` | `number` | Current level index (0–4) |
 | `state` / `stateRef` | `string` | Game state machine value |
 | `dirRef` | `{x,y}` | Direction applied on the last tick |
 | `dirQueueRef` | `{x,y}[]` | Buffered upcoming directions (max 2) |
+| `speedRef` | `number` | Current tick interval in ms (preserves boost across pause/resume) |
+| `foodsThisLevelRef` | `number` | Foods eaten in current level (drives per-food speed boost) |
 | `intervalRef` | `number` | ID of the active `setInterval` |
-| `tickRef` | `function` | Ref to the latest `tick` callback (breaks circular dependency) |
 
 #### Game state machine
 
@@ -181,42 +217,34 @@ CELL = 20        // pixel size of each cell (logical pixels)
 #### Key functions
 
 **`tick()`**
-Called by `setInterval` every N milliseconds (N = current level speed).
-1. Dequeues the next direction from `dirQueueRef` (rejecting 180° reversals).
-2. Computes the new head position.
-3. Checks for wall collision (`head.x < 0 || head.x >= COLS` etc.) → calls `die()`.
-4. Checks for self-collision (`snakeRef.current.some(...)`) → calls `die()`.
-5. If the head lands on food: grows snake, increments score, checks level-up, spawns new food.
-6. If not food: removes the tail segment (snake moves forward without growing).
-7. Updates both the ref and the React state.
+Called by `setInterval` every N milliseconds.
+1. Dequeues the next direction (rejects 180° reversals and duplicates).
+2. Computes new head position via `poolPrepend`.
+3. Wall collision → `die()`.
+4. Self collision → `die()`.
+5. Food eaten → score +10, level-up check, per-food speed boost, new food spawned.
+6. Not food → `snakeLenRef -= 1` (tail slot stays in pool, gets overwritten on the next prepend).
 
-`tickRef.current = tick` keeps the ref in sync on every render. `startLoop`'s `setInterval` calls `tickRef.current()` rather than `tick` directly — this breaks the circular `useCallback` dependency between `startLoop` and `tick`.
-
-**`startLoop(lvlIdx)`**
-Clears any existing interval and starts a new one at the speed of `LEVELS[lvlIdx]`. Called on game start, resume, and level-up.
-
-**`stopLoop()`**
-Clears the interval. Called on pause, death, reset, and component unmount.
+**Per-food speed boost:**
+```js
+const boostedSpeed = Math.max(SPEED_FLOOR,
+  LEVELS[level].speed - foodsThisLevel * SPEED_PER_FOOD);
+```
+Resets to the new base speed on every level-up. `speedRef` persists the current interval across pause/resume so the boost is not lost.
 
 **`applyDir(newDir)`**
-Called by keyboard handler and swipe gesture handler. Validates against the last queued direction (prevents 180° flip and duplicate inputs), then pushes to `dirQueueRef` (capped at 2). If the game is `idle`, transitions to `running` and starts the loop.
+Validates against the last queued direction, then pushes to `dirQueueRef`. If `state === 'idle'`, transitions to `running` and starts the loop — the idle check runs **before** direction filters so all four directions can start the game (including LEFT/RIGHT which would otherwise be filtered against `INIT_DIR = {x:1, y:0}`).
 
-**`pause()`**
-Toggles between `running` ↔ `paused`. Stops/starts the interval accordingly.
-
-**`reset()`**
-Stops the loop, resets all refs and state to initial values, clears the direction queue.
-
-**`randomFood(snake)`**
-Randomly picks a cell not occupied by the snake. Includes an iteration cap (1000 attempts) to avoid an infinite loop if the board is nearly full.
+**`randomFood(headIdx, snakeLen)`**
+Builds the occupied set in one pass through `segPool`, collects all free cells, picks uniformly at random. Returns `null` only when all 100 cells are occupied (board full). Food object includes `.type = Math.floor(Math.random() * 6)` for fruit selection.
 
 #### Side effects
 
 | Effect | Purpose |
 |--------|---------|
 | `window.addEventListener('keydown', ...)` | Keyboard input (arrows, WASD, P, Enter/Space) |
-| `document.addEventListener('visibilitychange', ...)` | Auto-pause when user switches tabs |
-| Cleanup `useEffect(() => () => stopLoop(), [])` | Clears interval when component unmounts |
+| `document.addEventListener('visibilitychange', ...)` | Auto-pause on tab switch |
+| `useEffect(() => () => stopLoop(), [])` | Clears interval on unmount |
 
 ---
 
@@ -224,86 +252,104 @@ Randomly picks a cell not occupied by the snake. Includes an iteration cap (1000
 
 The root component. Calls `useSnake()` and distributes the returned values to child components.
 
-```
-useSnake() returns:
-  snake, food, score, best, levelIndex, state  → passed as props to display components
-  applyDir, pause, reset                        → passed as callbacks to interactive components
-```
+Swipe gesture detection runs here: `onTouchStart` records the finger's starting position; `onTouchEnd` computes the delta and calls `applyDir` based on the dominant axis. A `SWIPE_THRESHOLD` (20 px) filters accidental micro-movements. `touchAction: 'none'` prevents browser scroll/zoom interference.
 
-Swipe gesture detection runs here: `onTouchStart` records the finger's starting position, `onTouchEnd` computes the delta and calls `applyDir` based on the dominant axis. A 20px threshold filters out accidental micro-movements. `touchAction: 'none'` prevents the browser from scrolling or zooming while the player's finger is on the canvas.
-
-Also renders the controls hint bar (keyboard shortcut reminder + Pause and Reset buttons) below the canvas.
+Maintains `stateRef` and `scoreRef` — plain ref mirrors of React state that `GameCanvas`'s rAF loop can read without triggering re-renders.
 
 ---
 
 ### `GameCanvas.jsx`
 
-Renders the game board to an HTML5 `<canvas>` element.
+Renders the game board using a **three.js WebGL** renderer.
 
-#### Retina/high-DPI scaling
+#### Scene setup (created once on mount, disposed on unmount)
 
-The canvas physical pixel dimensions are set to `SIZE × devicePixelRatio`. The 2D context is then scaled by the same ratio with `ctx.setTransform(dpr, 0, 0, dpr, 0, 0)`. The CSS keeps the canvas at 100% of its container in logical pixels. This means on a 2× Retina display the canvas has 4× the pixels of a standard display, producing sharp lines.
+| Object | Description |
+|--------|-------------|
+| `WebGLRenderer` | Targets the `<canvas>` element; `setPixelRatio(devicePixelRatio)` for Retina |
+| `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (100)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
+| `AmbientLight(0xffe8c8, 0.55)` | Warm base fill — prevents pure-shadow areas going black |
+| `DirectionalLight(0xfffde8, 1.1)` | Sun from upper-left; casts `PCFSoftShadowMap` shadows on the ground |
+| `DirectionalLight(0xc8e8ff, 0.25)` | Cool fill from lower-right for depth separation |
+| `PlaneGeometry(SIZE, SIZE)` | Sandy desert ground, `receiveShadow = true` |
+| `LineSegments` | Grid cell borders at Y=0.5 |
 
-#### Offscreen grid cache (`getGridCanvas()`)
+#### Snake rendering
 
-Drawing 41 horizontal and 41 vertical grid lines every frame is wasteful because the grid never changes. `getGridCanvas()` draws the background and all grid lines once into an offscreen `<canvas>` element stored in the module-level `gridCache` variable. Every frame, the main canvas blits the cached result with a single `ctx.drawImage()` call, then draws only the dynamic elements (food and snake) on top.
+- **Body segments**: `SphereGeometry(r=8.2, 20 width, 14 height segments)` with dark-green `MeshPhongMaterial`. One mesh per pool slot (100 total), hidden when not in the active snake. Each frame positions only the live `snakeLenRef` segments — O(snakeLen) per frame.
+- **Head**: Larger `SphereGeometry(r=9.4)` with brighter specular. Two eye sub-meshes (gold sphere + black pupil) are parented to the head mesh and rotate with it automatically.
+- **Head direction**: `headMesh.rotation.y = atan2(dx, dz)` computed from the head→neck vector each frame.
+- **Head interpolation**: Measures the real tick interval, sets `interpDuration = measured × 0.88`, and linearly interpolates the head's world position between grid cells each rAF frame for smooth movement.
 
-#### Drawing order
+#### Food rendering
 
-1. `ctx.drawImage(gridCache, ...)` — background + grid (one call)
-2. Food — red glowing circle at `food.x * CELL + CELL/2, food.y * CELL + CELL/2`
-3. Snake segments — from head (index 0) to tail, with decreasing opacity. Head has a colored glow via `ctx.shadowBlur`. Each segment is a rounded rectangle (`ctx.roundRect`).
+Six `SphereGeometry` meshes (one per fruit type) are pre-created with distinct `MeshPhongMaterial` colours. Only the current food's mesh is visible; it rotates `+0.022 rad/frame` around Y for a spin effect.
 
-#### Opacity encoding
+#### Coordinate mapping
 
-Body segments fade toward the tail. The hex color has a two-digit alpha suffix appended:
-```js
-const hex = Math.round(alpha * 255).toString(16).padStart(2, '0');
-ctx.fillStyle = `${color}${hex}`;  // e.g. "#4ecca3e0"
 ```
-8-digit hex colors (`#RRGGBBAA`) are part of the CSS Color Level 4 spec and are supported in all modern browsers.
+world X = col * CELL − HALF + CELL/2   (range −90 to +90)
+world Z = row * CELL − HALF + CELL/2   (range −90 to +90)
+world Y = resting height above ground
+```
+
+Camera at `(0, 300, 0)` with `up = (0, 0, −1)`: smaller Z → higher on screen, matching the grid's row-0-at-top convention.
+
+#### Effects
+
+| Effect | Implementation |
+|--------|---------------|
+| Death camera shake | `cam.position.x/z = amp × sin/cos(t)` over 500 ms |
+| Eat point-light flash | `PointLight` at eaten food's world position, intensity decays −0.2/frame |
+| Eat particle burst | `THREE.Points` (`BufferGeometry`); 12 particles per eat, colour from fruit type |
+| All inter-frame state | `animRef` (single object ref, no React overhead) |
+
+---
+
+### `DPad.jsx`
+
+On-screen 4-button directional pad for mobile players.
+
+- Uses `onPointerDown` (not `onTouchEnd`) — fires on first contact, not finger lift, for zero-latency response
+- `e.preventDefault()` suppresses the trailing synthetic click event
+- `touch-action: none` in CSS eliminates the browser's default touch delay
+- Accent colour tinted per level via CSS custom property `--dpad-color`
+- Each button has an `aria-label` (`"Move up"`, etc.)
 
 ---
 
 ### `Scoreboard.jsx`
 
-Purely presentational. Displays three items in a row:
-- **SCORE** — current score, colored with the current level's accent color
-- **Level badge** — level name (EASY / MEDIUM / …) with a tinted background matching the level color
+Purely presentational. Displays:
+- **SCORE** — current score, coloured with the level accent colour
+- **Level badge** — level name with a tinted background
 - **BEST** — all-time best score
-
-Receives `score`, `best`, `levelIndex` as props.
 
 ---
 
 ### `LevelBar.jsx`
 
-A progress bar showing how far the player is toward the next level.
+Progress bar toward the next level.
 
-**Progress calculation:**
 ```
-prev  = score threshold of the previous level (0 if on level 0)
-next  = score threshold of the current level
-progress = (score - prev) / (next - prev)   clamped to [0, 1]
+progress = (score − prevThreshold) / (nextThreshold − prevThreshold)
 ```
 
-On the final level (INSANE), `progress` is always `1` (full bar) and the label shows "MAX LEVEL" instead of the next-level hint.
-
-Has ARIA `role="progressbar"` with `aria-valuenow` for screen reader support.
+On INSANE (final level), `progress = 1` always and the label shows "MAX LEVEL". Has ARIA `role="progressbar"` with `aria-valuenow`.
 
 ---
 
 ### `Overlay.jsx`
 
-Renders a semi-transparent panel over the canvas for three non-running states:
+Semi-transparent panel rendered over the canvas for non-running states:
 
 | `state` | Shows |
 |---------|-------|
-| `idle` | Title "SNAKE" + swipe/keyboard hints |
+| `idle` | Title "SNAKE" + swipe/keyboard/D-Pad hints |
 | `paused` | "PAUSED" + Resume button |
 | `dead` | "GAME OVER" + final score + Play Again button |
 
-Returns `null` when `state === 'running'` so nothing obscures the canvas during play.
+Returns `null` when `state === 'running'`.
 
 ---
 
@@ -313,18 +359,17 @@ Global styles with a dark theme. Key sections:
 
 - **Body** — centered flex layout, `#0a0a0f` background
 - **`.app`** — vertical flex column, full width on mobile, max-width 420px on desktop (≥900px)
-- **`.scoreboard`** — horizontal flex, space-between, dark card
-- **`.level-bar-*`** — thin progress bar with animated fill
-- **`.canvas-wrap`** — `aspect-ratio: 1` container, `position: relative` for overlay positioning, fills screen edge-to-edge on mobile
-- **`.overlay`** — `position: absolute; inset: 0` + `backdrop-filter: blur` for the game state screens
-- **`.ctrl-btn` / `.overlay-btn`** — all have `:focus-visible` outlines for keyboard navigation
-- **Color contrast** — all muted text is `#777` or brighter on the `#0a0a0f` background to meet WCAG AA
+- **`.canvas-wrap`** — `aspect-ratio: 1` container, `position: relative` for overlay positioning
+- **`.dpad`** — CSS Grid `3×3` layout; center cell empty; buttons at N/S/E/W
+- **`.dpad-btn`** — `touch-action: none; user-select: none` for immediate pointer events
+- **`.overlay`** — `position: absolute; inset: 0` + `backdrop-filter: blur`
+- **Color contrast** — all text meets WCAG AA on `#0a0a0f` background
 
 ---
 
 ### `main.jsx`
 
-Standard Vite + React entry point. Mounts `<App>` inside React's `StrictMode` (which runs effects twice in development to catch bugs) into the `#root` div in `index.html`.
+Standard Vite + React entry point. Mounts `<App>` inside React's `StrictMode` into `#root`.
 
 ---
 
@@ -334,22 +379,22 @@ Standard Vite + React entry point. Mounts `<App>` inside React's `StrictMode` (w
 base: '/snake-game/'
 ```
 
-This is the only non-default setting. It tells Vite to prefix all asset URLs with `/snake-game/` so the app works correctly when served from `https://jeancardierg.github.io/snake-game/` rather than the root of a domain.
+Prefixes all asset URLs so the app works at `https://jeancardierg.github.io/snake-game/`.
 
 ---
 
 ### `deploy.yml`
 
-GitHub Actions workflow that runs on every push to `master`:
+GitHub Actions workflow on push to `master`:
 
-1. Checks out the repository
-2. Sets up Node 20 with npm cache
-3. Runs `npm ci` (clean install from lockfile)
-4. Runs `npm run build` (outputs to `dist/`)
-5. Uploads `dist/` as a GitHub Pages artifact
-6. Deploys the artifact to GitHub Pages
+1. Checkout + Node 20 setup with npm cache
+2. `npm ci` — clean install from lockfile
+3. `npm audit --omit=dev` — fails the build if any production dependency has a known vulnerability
+4. `npm run build` → `dist/`
+5. Upload `dist/` as GitHub Pages artifact
+6. Deploy via OIDC authentication (no secrets required)
 
-The workflow uses OIDC-based authentication (`id-token: write`) — no secrets needed. The `concurrency` block ensures only one deployment runs at a time and cancels any in-progress run if a new push arrives.
+`concurrency: cancel-in-progress: true` ensures only one deployment runs at a time.
 
 ---
 
@@ -357,33 +402,31 @@ The workflow uses OIDC-based authentication (`id-token: write`) — no secrets n
 
 ### The tick loop
 
-Every N milliseconds (N depends on level):
+Every N milliseconds (N = current boosted speed):
 
 ```
 tick()
  │
  ├─ Dequeue next direction from dirQueueRef
- │   └─ Skip if it would reverse 180°
+ │   └─ Reject 180° reversals and no-ops
  │
- ├─ Compute new head = {x: head.x + dir.x, y: head.y + dir.y}
+ ├─ newHead = poolPrepend(headIdx, head.x + dir.x, head.y + dir.y)
  │
  ├─ Wall check: head.x < 0 or >= COLS, head.y < 0 or >= ROWS → die()
  │
- ├─ Self check: any segment == head → die()
- │
- ├─ newSnake = [head, ...snake]   (prepend head)
+ ├─ Self check: any active segment == head → die()
  │
  ├─ Ate food?
- │   ├─ YES → score += 10, check best, check level-up, spawn new food
- │   │         (tail NOT removed → snake grows by 1)
- │   └─ NO  → newSnake.pop()     (remove tail → snake moves forward)
+ │   ├─ YES → score += 10, level-up check, speed boost, new food spawned
+ │   │         (snakeLenRef unchanged → body grows by 1 via the prepended head)
+ │   └─ NO  → snakeLenRef -= 1  (old tail slot stays, overwritten on next prepend)
  │
- └─ Update snakeRef + setSnake (triggers re-render)
+ └─ Update headIdxRef; call setScore/setState for React re-render
 ```
 
 ### Direction queue
 
-Without a queue, pressing Right then Up very quickly within a single tick would lose the Right input (it gets overwritten before `tick` reads it). The queue buffers up to 2 future directions:
+Without a queue, pressing RIGHT then UP within a single tick would lose the RIGHT input. The queue buffers up to `DIR_QUEUE_MAX = 2` future directions:
 
 ```
 Player presses: → then ↑ before next tick
@@ -394,15 +437,28 @@ Tick 1: dequeue →  →  snake turns right
 Tick 2: dequeue ↑  →  snake turns up
 ```
 
-Each queued direction is validated against the *previous queued direction* (not the current snake direction) so that a 180° flip through an intermediate direction is still blocked.
+Each direction is validated against the *previous queued direction* (not the current snake direction) so that a 180° flip through an intermediate step is still blocked.
+
+### Per-food speed boost
+
+```
+speed = max(SPEED_FLOOR, LEVELS[level].speed − foodsThisLevel × SPEED_PER_FOOD)
+```
+
+| Constant | Value | Effect |
+|----------|-------|--------|
+| `SPEED_PER_FOOD` | 8 ms | Subtracted per food within a level |
+| `SPEED_FLOOR` | 40 ms | Maximum of ~25 ticks/second |
+
+The boost accumulates within a level and resets to the new base speed on level-up. `speedRef` persists the current interval across pause/resume so the boost is not lost when pausing.
 
 ### Level-up
 
-After every food eaten:
 ```js
 while (lvl < LEVELS.length - 1 && newScore >= LEVELS[lvl].scoreNext) lvl++;
 ```
-The `while` handles the edge case where a single food eat skips multiple levels (impossible with current thresholds, but safe). If the level changed, `startLoop(newLevel)` is called immediately — the interval is recreated at the new (faster) speed.
+
+Handles the edge case of skipping multiple levels in one eat. Level-up restarts the interval at the new base speed and resets `foodsThisLevel`.
 
 ---
 
@@ -427,6 +483,7 @@ Open http://localhost:5173/snake-game/ in your browser.
 | `npm run build` | Build for production into `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run Vitest unit tests |
 
 ---
 
@@ -434,7 +491,6 @@ Open http://localhost:5173/snake-game/ in your browser.
 
 Deployment is fully automatic. Every push to `master` triggers the GitHub Actions workflow in `.github/workflows/deploy.yml`, which builds the project and pushes it to the `github-pages` environment.
 
-To deploy a change:
 ```bash
 git add .
 git commit -m "your change"
@@ -451,6 +507,7 @@ The site updates in ~30 seconds.
 |------|---------|------|
 | React | 19 | UI component model |
 | Vite | 8 | Dev server + build tool |
-| HTML5 Canvas API | — | Game rendering |
-| GitHub Actions | — | CI/CD |
+| three.js | 0.183 | WebGL 3D renderer |
+| Vitest | 4 | Unit testing |
+| GitHub Actions | — | CI/CD (build + audit + deploy) |
 | GitHub Pages | — | Static hosting |

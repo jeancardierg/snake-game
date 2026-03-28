@@ -1,18 +1,11 @@
 /**
  * DPad — touch directional pad for mobile players.
  *
- * Rendered as four arrow buttons arranged in a cross shape.
- * Hidden on screens wider than 900px (CSS media query) where keyboard is assumed.
- *
- * Touch handling notes:
- *   - Uses onTouchEnd (not onTouchStart) so the action fires when the finger
- *     lifts, not the instant it touches. This avoids accidental inputs when
- *     swiping across buttons to reach a target.
- *   - A touch-ID set (handledTouches) prevents the browser's synthetic click
- *     event from firing a second time after the touch event completes.
- *   - onClick is kept so the D-Pad also works with mouse clicks.
+ * Uses onPointerDown (not onTouchEnd) so the action fires on first contact
+ * rather than when the finger lifts. Works for both touch and mouse.
+ * e.preventDefault() suppresses the trailing synthetic click event.
+ * touch-action:none in CSS (already set) ensures no browser scroll delay.
  */
-import { useRef } from 'react';
 import { DIR, LEVELS } from '../constants';
 
 // Direction vectors imported from constants so there is a single source of truth.
@@ -29,18 +22,11 @@ const DIRS = [
  *   levelIndex  number           — used to tint the D-Pad accent color per level
  */
 export function DPad({ onDir, levelIndex }) {
-  const handledTouches = useRef(new Set());
   const safeIdx = Math.min(Math.max(levelIndex ?? 0, 0), LEVELS.length - 1);
   const level   = LEVELS[safeIdx];
 
-  const handleTouchEnd = (dir) => (e) => {
+  const handlePointerDown = (dir) => (e) => {
     e.preventDefault();
-    const id = e.changedTouches[0]?.identifier;
-    if (id !== undefined) {
-      if (handledTouches.current.has(id)) return;
-      handledTouches.current.add(id);
-      setTimeout(() => handledTouches.current.delete(id), 300);
-    }
     onDir(dir);
   };
 
@@ -54,9 +40,7 @@ export function DPad({ onDir, levelIndex }) {
         <button
           key={pos}
           className={`dpad-btn dpad-${pos}`}
-          onTouchEnd={handleTouchEnd(dir)}
-          onTouchCancel={(e) => e.preventDefault()}
-          onClick={() => onDir(dir)}
+          onPointerDown={handlePointerDown(dir)}
           aria-label={ariaLabel}
           style={{ borderColor: level.color + '55' }}
         >

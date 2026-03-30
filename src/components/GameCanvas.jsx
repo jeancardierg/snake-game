@@ -58,7 +58,7 @@ function makeCobraBodyTexture() {
   ctx.fillRect(24, 0, 16, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, 2);
+  tex.repeat.set(1, 1);
   return tex;
 }
 
@@ -175,6 +175,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     const cobraBodyTex = makeCobraBodyTexture();
     const cobraHeadTex = makeCobraHeadTexture();
+    const cobraConnTex = makeCobraBodyTexture();
+    cobraConnTex.repeat.set(1, 1);
 
     const bodyMat = new THREE.MeshPhongMaterial({
       map: cobraBodyTex,
@@ -183,6 +185,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       shininess: 35,
       emissive: new THREE.Color(0x0a1806),
     });
+    const connMat = bodyMat.clone();
+    connMat.map = cobraConnTex;
     const headMat = new THREE.MeshPhongMaterial({
       map: cobraHeadTex,
       color:    0x2a4a16,
@@ -205,7 +209,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     const CONN_R    = BODY_R * 0.92;
     const connGeo   = new THREE.CylinderGeometry(CONN_R, CONN_R, CELL, 12);
     const connMeshes = Array.from({ length: POOL_SIZE }, () => {
-      const m = new THREE.Mesh(connGeo, bodyMat);
+      const m = new THREE.Mesh(connGeo, connMat);
       m.castShadow = true;
       m.visible    = false;
       scene.add(m);
@@ -329,11 +333,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
         anim.lastTickMs = now;
       }
       const t    = Math.min(1, (now - anim.startMs) / anim.interpDuration);
+      const tE   = t * t * (3 - 2 * t); // smoothstep ease-in/out
       const dxR  = head.x - anim.prevCell.x;
       const dyR  = head.y - anim.prevCell.y;
       const skip = Math.abs(dxR) > 1 || Math.abs(dyR) > 1;
-      const hxF  = skip ? head.x : anim.prevCell.x + dxR * t;
-      const hyF  = skip ? head.y : anim.prevCell.y + dyR * t;
+      const hxF  = skip ? head.x : anim.prevCell.x + dxR * tE;
+      const hyF  = skip ? head.y : anim.prevCell.y + dyR * tE;
 
       // ── Death shake ────────────────────────────────────────────────────────
       if (state === 'dead' && anim.prevState !== 'dead') {

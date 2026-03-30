@@ -169,7 +169,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     // ── Snake materials (cobra textured) ──────────────────────────────────────
     const BODY_R = CELL * 0.38;
-    const HEAD_R = CELL * 0.47;
+    const HEAD_R = CELL * 0.41;
     const BODY_Y = BODY_R * 0.55;
     const HEAD_Y = HEAD_R * 0.60;
 

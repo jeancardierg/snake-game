@@ -223,9 +223,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     scene.add(headMesh);
 
     // Hood flare (flattened sphere behind head)
-    const hoodGeo  = new THREE.SphereGeometry(HEAD_R * 1.3, 16, 12);
+    const hoodGeo  = new THREE.SphereGeometry(HEAD_R * 0.85, 16, 12);
     const hoodMesh = new THREE.Mesh(hoodGeo, headMat);
-    hoodMesh.scale.set(1.6, 0.3, 1.0);
+    hoodMesh.scale.set(1.1, 0.2, 0.9);
     hoodMesh.position.set(0, -HEAD_R * 0.1, HEAD_R * 0.5);
     headMesh.add(hoodMesh);
 

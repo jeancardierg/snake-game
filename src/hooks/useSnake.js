@@ -27,6 +27,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
+import { playStart, playEat, playLevelUp, playDeath } from '../audio';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
 const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
@@ -142,6 +143,7 @@ export function useSnake() {
     stopLoop();
     stateRef.current = 'dead';
     setState('dead');
+    playDeath();
   }, [stopLoop]);
 
   // ── Core tick ─────────────────────────────────────────────────────────────────
@@ -198,6 +200,7 @@ export function useSnake() {
     const ate = hx === foodRef.current.x && hy === foodRef.current.y;
 
     if (ate) {
+      playEat();
       // 5a. Ate food: grow (tail kept, length stays incremented), update score
       const newScore = scoreRef.current + 10;
       scoreRef.current = newScore;
@@ -222,6 +225,7 @@ export function useSnake() {
       if (lvl !== levelRef.current) {
         levelRef.current = lvl;
         setLevel(lvl);
+        playLevelUp();
         foodsThisLevelRef.current = 0;  // reset per-food counter on level-up
         startLoop(lvl);                 // restarts at new level's base speed
       } else {
@@ -267,6 +271,7 @@ export function useSnake() {
     if (stateRef.current === 'idle') {
       stateRef.current = 'running';
       setState('running');
+      playStart();
       startLoop(levelRef.current);
     }
 

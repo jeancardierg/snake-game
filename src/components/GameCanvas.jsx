@@ -114,7 +114,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     // ── Scene ─────────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xb89850);
+    scene.background = new THREE.Color(0x120a04);
 
     // ── Camera (orthographic, top-down) ──────────────────────────────────────
     const cam = new THREE.OrthographicCamera(-HALF, HALF, HALF, -HALF, 1, 1000);
@@ -123,10 +123,10 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     cam.lookAt(0, 0, 0);
 
     // ── Lighting ─────────────────────────────────────────────────────────────
-    const ambient = new THREE.AmbientLight(0xffe8c8, 0.55);
+    const ambient = new THREE.AmbientLight(0xff5500, 0.25);
     scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xfffde8, 1.1);
+    const sun = new THREE.DirectionalLight(0xff3300, 0.7);
     sun.position.set(-80, 180, -60);
     sun.castShadow = true;
     sun.shadow.camera.left   = -120;
@@ -137,12 +137,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     sun.shadow.bias = -0.001;
     scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0xc8e8ff, 0.25);
+    const fill = new THREE.DirectionalLight(0x445566, 0.15);
     fill.position.set(60, 80, 80);
     scene.add(fill);
 
     // ── Ground plane ─────────────────────────────────────────────────────────
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0xc8a45a });
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x1e1508 });
     const ground    = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -163,7 +163,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
       scene.add(new THREE.LineSegments(
         geo,
-        new THREE.LineBasicMaterial({ color: 0x9a7a30, opacity: 0.40, transparent: true }),
+        new THREE.LineBasicMaterial({ color: 0x3d1f0a, opacity: 0.25, transparent: true }),
       ));
     }
 
@@ -251,6 +251,11 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     headConnMesh.visible    = false;
     scene.add(headConnMesh);
 
+    // ── Interpolated world-position buffers (reused each frame) ──────────────
+    // iSegX[i] / iSegZ[i] store the smoothed world X/Z for snake segment i
+    const iSegX = new Float32Array(POOL_SIZE + 1);
+    const iSegZ = new Float32Array(POOL_SIZE + 1);
+
     // ── Mine mesh (food) ──────────────────────────────────────────────────────
     const MINE_R = CELL * 0.35;
     const MINE_Y = MINE_R * 0.8;
@@ -325,7 +330,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       const head = segPool[headIdx % POOL_SIZE];
       if (anim.headIdx !== headIdx) {
         const measured = anim.lastTickMs !== null ? now - anim.lastTickMs : anim.interpDuration;
-        anim.interpDuration = Math.min(Math.max(measured * 0.88, 40), 400);
+        anim.interpDuration = Math.min(Math.max(measured * 0.92, 40), 400);
         const ph = segPool[(anim.headIdx < 0 ? headIdx : anim.headIdx) % POOL_SIZE];
         anim.prevCell   = { x: ph.x, y: ph.y };
         anim.startMs    = now;
@@ -392,24 +397,38 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       for (let i = 1; i < snakeLen; i++) {
         const seg  = segPool[(headIdx + i) % POOL_SIZE];
         const mesh = segMeshes[(headIdx + i) % POOL_SIZE];
-        const wp   = cellToWorld(seg.x, seg.y, BODY_Y);
+
+        // Interpolate each segment from its previous position (ring slot i+1) toward current.
+        // Ring slot i+1 held this segment's position before the latest tick.
+        // Tail segment (i === snakeLen-1) is not interpolated — ring slot beyond tail is stale.
+        let sxF = seg.x, szF = seg.y;
+        if (i < snakeLen - 1) {
+          const prev = segPool[(headIdx + i + 1) % POOL_SIZE];
+          const sdx  = seg.x - prev.x;
+          const sdz  = seg.y - prev.y;
+          if (Math.abs(sdx) <= 1 && Math.abs(sdz) <= 1) {
+            sxF = prev.x + sdx * tE;
+            szF = prev.y + sdz * tE;
+          }
+        }
+
+        const wp = cellToWorld(sxF, szF, BODY_Y);
+        iSegX[i] = wp.x;
+        iSegZ[i] = wp.z;
         mesh.position.set(wp.x, wp.y, wp.z);
         mesh.visible = true;
 
-        // Connector to previous segment
+        // Connector between this segment and the one ahead of it (both interpolated)
         if (i >= 2) {
-          const prev = segPool[(headIdx + i - 1) % POOL_SIZE];
-          const dx = prev.x - seg.x;
-          const dz = prev.y - seg.y;
-          if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1 && (dx !== 0 || dz !== 0)) {
+          const adx = iSegX[i - 1] - iSegX[i];
+          const adz = iSegZ[i - 1] - iSegZ[i];
+          if (Math.abs(adx) < CELL * 1.5 && Math.abs(adz) < CELL * 1.5 && (adx !== 0 || adz !== 0)) {
             const conn = connMeshes[(headIdx + i) % POOL_SIZE];
-            const midX = (seg.x + prev.x) / 2 * CELL - HALF + CELL / 2;
-            const midZ = (seg.y + prev.y) / 2 * CELL - HALF + CELL / 2;
-            conn.position.set(midX, BODY_Y, midZ);
+            conn.position.set((iSegX[i] + iSegX[i - 1]) / 2, BODY_Y, (iSegZ[i] + iSegZ[i - 1]) / 2);
             conn.rotation.set(
-              dx !== 0 ? 0 : Math.PI / 2,
+              Math.abs(adx) <= Math.abs(adz) ? Math.PI / 2 : 0,
               0,
-              dx !== 0 ? Math.PI / 2 : 0,
+              Math.abs(adx) > Math.abs(adz) ? Math.PI / 2 : 0,
             );
             conn.visible = true;
           }
@@ -419,6 +438,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       // ── Head ──────────────────────────────────────────────────────────────
       const hwp = cellToWorld(hxF, hyF, HEAD_Y);
       headMesh.position.set(hwp.x, hwp.y, hwp.z);
+      iSegX[0] = hwp.x;
+      iSegZ[0] = hwp.z;
 
       if (snakeLen > 1) {
         const neck = segPool[(headIdx + 1) % POOL_SIZE];
@@ -430,17 +451,11 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
           headMesh.rotation.y = Math.atan2(ndx, ndz);
         }
 
-        // Head-to-first-body connector
-        const firstBody = segPool[(headIdx + 1) % POOL_SIZE];
-        const bwp = cellToWorld(firstBody.x, firstBody.y, BODY_Y);
-        const adx = hwp.x - bwp.x;
-        const adz = hwp.z - bwp.z;
+        // Head-to-first-body connector (both ends use interpolated world positions)
+        const adx = iSegX[0] - iSegX[1];
+        const adz = iSegZ[0] - iSegZ[1];
         if (Math.abs(adx) < CELL * 1.5 && Math.abs(adz) < CELL * 1.5) {
-          headConnMesh.position.set(
-            (hwp.x + bwp.x) / 2,
-            BODY_Y,
-            (hwp.z + bwp.z) / 2,
-          );
+          headConnMesh.position.set((iSegX[0] + iSegX[1]) / 2, BODY_Y, (iSegZ[0] + iSegZ[1]) / 2);
           headConnMesh.rotation.set(
             Math.abs(adx) <= Math.abs(adz) ? Math.PI / 2 : 0,
             0,

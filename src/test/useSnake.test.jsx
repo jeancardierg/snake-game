@@ -139,6 +139,56 @@ describe('state machine', () => {
   });
 });
 
+// ─── Self-collision (integration) ─────────────────────────────────────────────
+
+describe('self-collision', () => {
+  it('lets the head follow the tail into the cell it vacates this tick', () => {
+    // Regression guard: moving into the CURRENT tail cell while not eating must
+    // be legal, because the tail moves off that cell on the same tick.
+    const { result } = renderHook(() => useSnake());
+
+    // Start moving right (INIT_DIR), then grow to length 4 by eating one food
+    // placed directly ahead of the head at (6,5). Head starts at (5,5).
+    act(() => result.current.applyDir(DIR.RIGHT));
+    act(() => { result.current.foodRef.current = { x: 6, y: 5 }; });
+    tick(0);
+    expect(result.current.snakeLenRef.current).toBe(4);
+
+    // Pin food to a far corner so the following square makes no accidental eat.
+    act(() => { result.current.foodRef.current = { x: 0, y: 0 }; });
+
+    // Snake is now (6,5)(5,5)(4,5)(3,5). Trace a unit square so the head lands
+    // back on (5,5) — the current tail cell — without eating.
+    act(() => result.current.applyDir(DIR.DOWN)); tick(0); // head → (6,6)
+    act(() => result.current.applyDir(DIR.LEFT)); tick(0); // head → (5,6)
+    act(() => result.current.applyDir(DIR.UP));   tick(0); // head → (5,5) = old tail
+
+    expect(result.current.state).toBe('running');
+  });
+
+  it('dies when the head hits a non-tail body segment', () => {
+    // A tight clockwise loop where the head runs into its own neck/body.
+    const { result } = renderHook(() => useSnake());
+
+    act(() => result.current.applyDir(DIR.RIGHT));
+    // Grow to length 5 so a unit-square turn collides with a mid-body segment.
+    act(() => { result.current.foodRef.current = { x: 6, y: 5 }; });
+    tick(0);
+    act(() => { result.current.foodRef.current = { x: 7, y: 5 }; });
+    tick(0);
+    expect(result.current.snakeLenRef.current).toBe(5);
+
+    act(() => { result.current.foodRef.current = { x: 0, y: 0 }; });
+    // Snake: (7,5)(6,5)(5,5)(4,5)(3,5). Turn down then left then up: the up move
+    // lands on (6,5), a mid-body segment (not the tail) → death.
+    act(() => result.current.applyDir(DIR.DOWN)); tick(0); // head → (7,6)
+    act(() => result.current.applyDir(DIR.LEFT)); tick(0); // head → (6,6)
+    act(() => result.current.applyDir(DIR.UP));   tick(0); // head → (6,5) = body
+
+    expect(result.current.state).toBe('dead');
+  });
+});
+
 // ─── Direction queue ──────────────────────────────────────────────────────────
 
 describe('direction queue', () => {
@@ -265,11 +315,12 @@ describe('visibility change', () => {
 // ─── localStorage resilience ──────────────────────────────────────────────────
 
 describe('localStorage resilience', () => {
-  it('treats corrupt localStorage value as 0', () => {
+  it('treats corrupt localStorage value as 0 (not NaN)', () => {
     localStorage.setItem('snakeBest', 'not-a-number');
     const { result } = renderHook(() => useSnake());
-    // parseInt('not-a-number') = NaN; hook should treat it as 0
-    expect(result.current.best === 0 || isNaN(result.current.best)).toBe(true);
+    // parseInt('not-a-number') = NaN; readBestScore must coerce it to 0 so the
+    // UI never shows "NaN" and the best-score comparison isn't wedged.
+    expect(result.current.best).toBe(0);
   });
 
   it('continues without throwing when localStorage.setItem fails', () => {

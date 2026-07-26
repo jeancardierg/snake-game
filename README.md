@@ -15,6 +15,7 @@ A classic Snake game built with React, rendered with a **three.js WebGL** engine
 - [File-by-File Reference](#file-by-file-reference)
   - [constants.js](#constantsjs)
   - [pool.js](#pooljs)
+  - [logic.js](#logicjs)
   - [useSnake.js](#usesnakejs)
   - [App.jsx](#appjsx)
   - [GameCanvas.jsx](#gamecanvasjsx)
@@ -47,13 +48,13 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 
 ## Features
 
-- **3D WebGL rendering** — Phong-shaded sphere segments with real-time shadows, directional sun + ambient lighting, and a desert ground plane
+- **3D WebGL rendering** — a textured king-cobra snake (chevron-banded body, hood flare, eyes) with real-time PCF-soft shadows, warm directional + ambient lighting, and a light-grey battlefield ground plane
 - **5 progressive speed levels** — EASY → MEDIUM → FAST → HYPER → INSANE
 - **Per-food speed boost** — each food eaten within a level shaves 8 ms off the tick interval, up to a hard floor of 40 ms
 - **Automatic level-up** based on score thresholds
-- **6 random fruit types** — each food spawn picks a random fruit (apple, orange, strawberry, banana, watermelon, grape); colour-matched particles burst on eat
+- **Sea-mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; an orange particle burst + point-light flash fire on each eat
 - **Best score** saved in `localStorage` across sessions
-- **Retina/high-DPI rendering** — WebGL pixel ratio set to `devicePixelRatio` for crisp output on all screens
+- **Retina/high-DPI rendering** — the WebGL drawing buffer is sized to the canvas's displayed size × `devicePixelRatio` and re-synced on resize via `ResizeObserver` for crisp output on all screens
 - **Input queue** — up to 2 direction changes buffered per tick, so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
 - **On-screen D-Pad** — 4-button directional pad for mobile, fires on pointer-down (zero latency)
@@ -84,8 +85,10 @@ snake-react/
 │   ├── hooks/
 │   │   └── useSnake.js         # All game logic (single source of truth)
 │   ├── App.jsx                 # Root component — wires everything together
+│   ├── audio.js                # 8-bit Web Audio sound effects
 │   ├── constants.js            # Grid dimensions, level configs, input constants
 │   ├── index.css               # Global styles and layout
+│   ├── logic.js                # Pure game rules (shared by the hook and tests)
 │   ├── main.jsx                # React entry point
 │   └── pool.js                 # Circular ring-buffer for zero-allocation segments
 ├── index.html                  # HTML shell (includes CSP meta tag)
@@ -171,6 +174,20 @@ Pre-allocates `POOL_SIZE = COLS × ROWS = 100` `{x, y}` objects as a circular ri
 
 ---
 
+### `logic.js`
+
+Pure, side-effect-free game rules, extracted so the tick loop (`useSnake.js`) and the test suite exercise the **same** code instead of re-implementations.
+
+| Export | Description |
+|--------|-------------|
+| `isReversal(cur, next)` | True if `next` is a 180° reversal of `cur` |
+| `isSameDir(a, b)` | True if two direction vectors are identical |
+| `nextHead(head, dir)` | Head cell after one step in `dir` |
+| `isWall(x, y)` | True if `(x, y)` lies outside the board |
+| `levelForScore(score)` | Level index for a score (handles multi-threshold jumps) |
+
+---
+
 ### `useSnake.js`
 
 **The entire game engine.** This single custom hook contains all state, all refs, all game logic, and all side effects.
@@ -181,7 +198,7 @@ Pre-allocates `POOL_SIZE = COLS × ROWS = 100` `{x, y}` objects as a circular ri
 |------|------|---------|
 | `headIdxRef` | `number` | Index of the head segment in `segPool` |
 | `snakeLenRef` | `number` | Current live segment count |
-| `foodRef` | `{x,y,type}` | Current food cell + fruit type (0–5) |
+| `foodRef` | `{x,y}` | Current food cell |
 | `score` / `scoreRef` | `number` | Current score (10 pts per food) |
 | `best` / `bestRef` | `number` | All-time best, persisted in `localStorage` |
 | `levelIndex` / `levelRef` | `number` | Current level index (0–4) |
@@ -221,7 +238,7 @@ Called by `setInterval` every N milliseconds.
 1. Dequeues the next direction (rejects 180° reversals and duplicates).
 2. Computes new head position via `poolPrepend`.
 3. Wall collision → `die()`.
-4. Self collision → `die()`.
+4. Self collision → `die()` (the tail is excluded when not eating — it vacates its cell this same tick, so following it is legal).
 5. Food eaten → score +10, level-up check, per-food speed boost, new food spawned.
 6. Not food → `snakeLenRef -= 1` (tail slot stays in pool, gets overwritten on the next prepend).
 
@@ -236,7 +253,7 @@ Resets to the new base speed on every level-up. `speedRef` persists the current 
 Validates against the last queued direction, then pushes to `dirQueueRef`. If `state === 'idle'`, transitions to `running` and starts the loop — the idle check runs **before** direction filters so all four directions can start the game (including LEFT/RIGHT which would otherwise be filtered against `INIT_DIR = {x:1, y:0}`).
 
 **`randomFood(headIdx, snakeLen)`**
-Builds the occupied set in one pass through `segPool`, collects all free cells, picks uniformly at random. Returns `null` only when all 100 cells are occupied (board full). Food object includes `.type = Math.floor(Math.random() * 6)` for fruit selection.
+Builds the occupied set in one pass through `segPool`, collects all free cells, picks uniformly at random. Returns a plain `{x, y}` cell, or `null` only when all 100 cells are occupied (board full). Exported so it can be unit-tested directly.
 
 #### Side effects
 
@@ -266,24 +283,27 @@ Renders the game board using a **three.js WebGL** renderer.
 
 | Object | Description |
 |--------|-------------|
-| `WebGLRenderer` | Targets the `<canvas>` element; `setPixelRatio(devicePixelRatio)` for Retina |
+| `WebGLRenderer` | Targets the `<canvas>`; drawing buffer sized to the displayed CSS size × `devicePixelRatio`, kept in sync by a `ResizeObserver` |
 | `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (100)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
-| `AmbientLight(0xffe8c8, 0.55)` | Warm base fill — prevents pure-shadow areas going black |
-| `DirectionalLight(0xfffde8, 1.1)` | Sun from upper-left; casts `PCFSoftShadowMap` shadows on the ground |
-| `DirectionalLight(0xc8e8ff, 0.25)` | Cool fill from lower-right for depth separation |
-| `PlaneGeometry(SIZE, SIZE)` | Sandy desert ground, `receiveShadow = true` |
+| `AmbientLight(0xff5500, 0.25)` | Warm base fill so shadowed areas don't go pure black |
+| `DirectionalLight(0xff3300, 0.7)` | Warm sun from the upper-left; casts `PCFSoftShadowMap` shadows |
+| `DirectionalLight(0x445566, 0.15)` | Cool fill from the lower-right for depth separation |
+| `PlaneGeometry(SIZE, SIZE)` | Light-grey battlefield ground (`0xd3d3d3`), `receiveShadow = true` |
 | `LineSegments` | Grid cell borders at Y=0.5 |
 
-#### Snake rendering
+Scene background is near-black (`0x120a04`).
 
-- **Body segments**: `SphereGeometry(r=8.2, 20 width, 14 height segments)` with dark-green `MeshPhongMaterial`. One mesh per pool slot (100 total), hidden when not in the active snake. Each frame positions only the live `snakeLenRef` segments — O(snakeLen) per frame.
-- **Head**: Larger `SphereGeometry(r=9.4)` with brighter specular. Two eye sub-meshes (gold sphere + black pupil) are parented to the head mesh and rotate with it automatically.
+#### Snake rendering — king cobra
+
+- **Body segments**: `SphereGeometry(r = CELL·0.38)` mapped with a procedural cobra-skin `CanvasTexture` (olive base + cream chevron banding) on a `MeshPhongMaterial`. One mesh per pool slot (100 total), hidden when outside the active snake; each frame positions only the live `snakeLenRef` segments — O(snakeLen) per frame.
+- **Connectors**: `CylinderGeometry` links between adjacent segments produce a continuous body rather than a bead chain.
+- **Head**: a larger `SphereGeometry(r = CELL·0.41)` with its own hood-marking texture, a flattened **hood flare** mesh, and two eye sub-meshes (gold sphere + black pupil) parented so they rotate with the head.
 - **Head direction**: `headMesh.rotation.y = atan2(dx, dz)` computed from the head→neck vector each frame.
-- **Head interpolation**: Measures the real tick interval, sets `interpDuration = measured × 0.88`, and linearly interpolates the head's world position between grid cells each rAF frame for smooth movement.
+- **Interpolation**: measures the real tick interval and smoothstep-interpolates the head and body between grid cells each rAF frame for fluid motion. A shared scratch `Vector3` is reused for cell→world conversion to avoid per-frame allocation.
 
-#### Food rendering
+#### Food rendering — sea mine
 
-Six `SphereGeometry` meshes (one per fruit type) are pre-created with distinct `MeshPhongMaterial` colours. Only the current food's mesh is visible; it rotates `+0.022 rad/frame` around Y for a spin effect.
+A single `Group` renders the food as a dark metallic sphere (`MeshPhongMaterial`) ringed by eight cone **spikes**, topped by a red **detonator** that blinks via an animated `emissive`. The group spins slowly around Y. The food is a plain `{x, y}` cell — there is no fruit type.
 
 #### Coordinate mapping
 
@@ -300,8 +320,9 @@ Camera at `(0, 300, 0)` with `up = (0, 0, −1)`: smaller Z → higher on screen
 | Effect | Implementation |
 |--------|---------------|
 | Death camera shake | `cam.position.x/z = amp × sin/cos(t)` over 500 ms |
-| Eat point-light flash | `PointLight` at eaten food's world position, intensity decays −0.2/frame |
-| Eat particle burst | `THREE.Points` (`BufferGeometry`); 12 particles per eat, colour from fruit type |
+| Eat point-light flash | `PointLight` at the eaten cell's world position, intensity decays −0.2/frame |
+| Eat particle burst | `THREE.Points` (`BufferGeometry`); 12 orange particles per eat |
+| GPU cleanup | on unmount every geometry, material, and texture is disposed (not just the renderer) |
 | All inter-frame state | `animRef` (single object ref, no React overhead) |
 
 ---
@@ -389,10 +410,12 @@ GitHub Actions workflow on push to `master`:
 
 1. Checkout + Node 20 setup with npm cache
 2. `npm ci` — clean install from lockfile
-3. `npm audit --omit=dev` — fails the build if any production dependency has a known vulnerability
-4. `npm run build` → `dist/`
-5. Upload `dist/` as GitHub Pages artifact
-6. Deploy via OIDC authentication (no secrets required)
+3. `npm run lint` — ESLint must pass
+4. `npm test` — the Vitest suite must pass
+5. `npm audit --omit=dev --audit-level=high` — fails on a high-or-worse production-dependency vulnerability
+6. `npm run build` → `dist/`
+7. Upload `dist/` as GitHub Pages artifact
+8. Deploy via OIDC authentication (no secrets required)
 
 `concurrency: cancel-in-progress: true` ensures only one deployment runs at a time.
 
@@ -414,7 +437,7 @@ tick()
  │
  ├─ Wall check: head.x < 0 or >= COLS, head.y < 0 or >= ROWS → die()
  │
- ├─ Self check: any active segment == head → die()
+ ├─ Self check: head hits a non-tail segment → die()  (tail excluded when not eating)
  │
  ├─ Ate food?
  │   ├─ YES → score += 10, level-up check, speed boost, new food spawned
@@ -509,5 +532,5 @@ The site updates in ~30 seconds.
 | Vite | 8 | Dev server + build tool |
 | three.js | 0.183 | WebGL 3D renderer |
 | Vitest | 4 | Unit testing |
-| GitHub Actions | — | CI/CD (build + audit + deploy) |
+| GitHub Actions | — | CI/CD (lint + test + audit + build + deploy) |
 | GitHub Pages | — | Static hosting |

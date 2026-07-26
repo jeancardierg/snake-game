@@ -12,29 +12,23 @@
  *   best        number  — all-time best score (from localStorage)
  *   levelIndex  number  — index into LEVELS for color and label
  */
-import { useState, useEffect, useRef } from 'react';
 import { LEVELS } from '../constants';
 
 export function Scoreboard({ score, best, levelIndex }) {
   const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
   const level = LEVELS[safeIdx];
 
-  // flashKey increments on each score increase; changing the key remounts the
-  // span, restarting the CSS animation cleanly without extra state.
-  const [flashKey, setFlashKey] = useState(0);
-  const prevScoreRef = useRef(score);
-  useEffect(() => {
-    if (score > prevScoreRef.current) setFlashKey(k => k + 1);
-    prevScoreRef.current = score;
-  }, [score]);
-
   return (
     <div className="scoreboard">
       <div className="score-block">
         <span className="score-label">SCORE</span>
+        {/* key={score} remounts the span whenever the score changes, which
+            restarts the CSS flash animation with no state or effect. score > 0
+            gates the animation so it never fires on first render or after a
+            reset to 0 (score only ever increases during play). */}
         <span
-          key={flashKey}
-          className={`score-value${flashKey > 0 ? ' score-flash' : ''}`}
+          key={score}
+          className={`score-value${score > 0 ? ' score-flash' : ''}`}
           style={{ color: level.color }}
         >
           {score}

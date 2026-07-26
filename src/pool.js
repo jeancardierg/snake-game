@@ -16,7 +16,7 @@
  */
 import { COLS, ROWS } from './constants';
 
-export const POOL_SIZE = COLS * ROWS;  // 400 — maximum possible snake length
+export const POOL_SIZE = COLS * ROWS;  // 100 — maximum possible snake length
 
 // Single contiguous allocation, shared by useSnake (writes) and GameCanvas (reads).
 export const segPool = Array.from({ length: POOL_SIZE }, () => ({ x: 0, y: 0 }));

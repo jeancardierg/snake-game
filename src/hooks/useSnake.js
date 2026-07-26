@@ -27,6 +27,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
+import { isReversal, isSameDir, nextHead, isWall, levelForScore } from '../logic';
 import { playStart, playEat, playLevelUp, playDeath } from '../audio';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
@@ -45,7 +46,11 @@ initPool(INIT_SNAKE);
  */
 function readBestScore() {
   try {
-    return parseInt(localStorage.getItem('snakeBest') || '0', 10);
+    // parseInt on a non-numeric or missing value yields NaN — coerce to 0 so a
+    // corrupt localStorage entry can never propagate "NaN" into the UI or wedge
+    // the best-score comparison (newScore > NaN is always false).
+    const n = parseInt(localStorage.getItem('snakeBest'), 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   } catch (e) {
     console.warn('[useSnake] localStorage unavailable:', e.message);
     return 0;
@@ -67,8 +72,10 @@ function readBestScore() {
  *
  * Returns null only when every cell is occupied (board full = game won).
  * Caller is responsible for handling null without moving the food.
+ *
+ * Exported so it can be unit-tested directly (occupancy + null-on-full).
  */
-function randomFood(headIdx, snakeLen) {
+export function randomFood(headIdx, snakeLen) {
   // Build occupied set in one pass
   const occupied = new Set();
   for (let i = 0; i < snakeLen; i++) {
@@ -85,8 +92,7 @@ function randomFood(headIdx, snakeLen) {
   }
 
   if (free.length === 0) return null;  // board full
-  const cell = free[Math.floor(Math.random() * free.length)];
-  return { ...cell, type: Math.floor(Math.random() * 6) };
+  return free[Math.floor(Math.random() * free.length)];
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -162,28 +168,27 @@ export function useSnake() {
    *  6. No setState for snake/food — GameCanvas reads refs directly via rAF.
    */
   const tick = useCallback(() => {
-    // 1. Dequeue next direction
+    // 1. Dequeue next direction (reject 180° reversals)
     if (dirQueueRef.current.length > 0) {
       const next = dirQueueRef.current.shift();
-      const cur  = dirRef.current;
-      if (!(next.x === -cur.x && next.y === -cur.y)) {
-        dirRef.current = next;
-      }
+      if (!isReversal(dirRef.current, next)) dirRef.current = next;
     }
 
     // 2. New head = current head + direction vector
     const curHead = poolGet(headIdxRef.current, 0);
-    const hx = curHead.x + dirRef.current.x;
-    const hy = curHead.y + dirRef.current.y;
+    const { x: hx, y: hy } = nextHead(curHead, dirRef.current);
 
     // 3a. Wall collision
-    if (hx < 0 || hx >= COLS || hy < 0 || hy >= ROWS) {
-      return die();
-    }
+    if (isWall(hx, hy)) return die();
 
-    // 3b. Self collision — check all current segments before prepend
+    // 3b. Self collision. i starts at 1 — index 0 is the current head, which the
+    // moved head can never equal. When NOT eating, the tail (last segment)
+    // vacates its cell this same tick, so moving into the old tail cell is legal
+    // (canonical Snake); exclude it. When eating, the tail stays, so include it.
     const snakeLen = snakeLenRef.current;
-    for (let i = 0; i < snakeLen; i++) {
+    const willEat  = hx === foodRef.current.x && hy === foodRef.current.y;
+    const checkLen = willEat ? snakeLen : snakeLen - 1;
+    for (let i = 1; i < checkLen; i++) {
       const s = segPool[(headIdxRef.current + i) % POOL_SIZE];
       if (s.x === hx && s.y === hy) return die();
     }
@@ -197,9 +202,7 @@ export function useSnake() {
       console.error('[useSnake] snake length exceeded POOL_SIZE — ring buffer overflow imminent');
     }
 
-    const ate = hx === foodRef.current.x && hy === foodRef.current.y;
-
-    if (ate) {
+    if (willEat) {
       playEat();
       // 5a. Ate food: grow (tail kept, length stays incremented), update score
       const newScore = scoreRef.current + 10;
@@ -219,9 +222,8 @@ export function useSnake() {
         LEVELS[levelRef.current].speed - foodsThisLevelRef.current * SPEED_PER_FOOD
       );
 
-      // Level-up: while loop handles jumping past multiple thresholds at once
-      let lvl = levelRef.current;
-      while (lvl < LEVELS.length - 1 && newScore >= LEVELS[lvl].scoreNext) lvl++;
+      // Level-up (levelForScore jumps past multiple thresholds crossed at once)
+      const lvl = levelForScore(newScore);
       if (lvl !== levelRef.current) {
         levelRef.current = lvl;
         setLevel(lvl);
@@ -279,8 +281,8 @@ export function useSnake() {
       ? dirQueueRef.current[dirQueueRef.current.length - 1]
       : dirRef.current;
 
-    if (newDir.x === -last.x && newDir.y === -last.y) return;
-    if (newDir.x === last.x  && newDir.y === last.y)  return;
+    if (isReversal(last, newDir)) return;
+    if (isSameDir(last, newDir))  return;
 
     // Queue is capped at DIR_QUEUE_MAX (2). Inputs beyond that are dropped
     // intentionally — two buffered turns cover any legitimate play pattern
@@ -308,22 +310,11 @@ export function useSnake() {
     snakeLenRef.current = INIT_SNAKE.length;
     dirRef.current      = { x: 1, y: 0 };
     dirQueueRef.current = [];
-    // randomFood on a 3-segment snake has 97 free cells on a 10×10 grid — null is impossible here.
-    // Fallback picks the first free cell deterministically rather than a hardcoded
-    // coordinate that could coincide with the snake if INIT_SNAKE ever changes.
+    // randomFood returns null only when every cell is occupied — impossible for
+    // the 3-segment INIT_SNAKE (97 free cells). On the theoretical null, keep the
+    // current (already-valid) food rather than moving it onto the snake.
     const initFood = randomFood(headIdxRef.current, snakeLenRef.current);
-    if (!initFood) {
-      // Should never happen; guard against future INIT_SNAKE changes.
-      const occupied = new Set(INIT_SNAKE.map(s => `${s.x},${s.y}`));
-      for (let x = 0; x < COLS; x++) {
-        for (let y = 0; y < ROWS; y++) {
-          if (!occupied.has(`${x},${y}`)) { foodRef.current = { x, y }; break; }
-        }
-        if (foodRef.current !== undefined) break;
-      }
-    } else {
-      foodRef.current = initFood;
-    }
+    if (initFood) foodRef.current = initFood;
     scoreRef.current          = 0;
     levelRef.current          = 0;
     stateRef.current          = 'idle';

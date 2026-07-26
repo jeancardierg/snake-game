@@ -4,6 +4,36 @@ Date: 2026-07-26
 Scope: full repo (source, tests, build, CI, docs, assets)
 Method: static review + empirical run of lint / tests / build / audit on the current tree.
 
+## Resolution status — all 15 items addressed (2026-07-26)
+
+Every finding below was fixed on branch `claude/repo-audit-report-i4qudc`. Post-fix CI-equivalent run:
+
+| Check | Before | After |
+|-------|--------|-------|
+| `npm run lint` | ❌ 1 error | ✅ clean |
+| `npm test` | 66 pass, 0% component cov | ✅ 86 pass; components ~94%, `logic.js` 100% |
+| `npm run build` | 722 KB single chunk, >500 KB warning | ✅ split: app 67 KB gzip + three 128 KB gzip, no warning |
+| `npm audit --omit=dev --audit-level=high` | ungated | ✅ 0 vulnerabilities, now gated in CI |
+
+Per-item notes:
+- **#1** CI: `lint` + `test` steps added; audit gated at `--audit-level=high`.
+- **#2** lint: Scoreboard flash reworked to `key={score}` (no `setState`-in-effect).
+- **#3** README: rendering / food / lighting / features / CI sections rewritten to the mine + cobra + grey-field reality; `logic.js` documented.
+- **#4** tail: self-collision now excludes the tail when not eating (integration-tested both directions).
+- **#5** NaN: `readBestScore` coerces non-finite/negative to 0; test tightened to `=== 0`.
+- **#6** tests: pure rules extracted to `logic.js` and imported by source + tests; `randomFood` exported + tested; new `components.test.jsx` → 86 tests.
+- **#7** bundle: three split into its own cached chunk via `manualChunks`; `chunkSizeWarningLimit` set intentionally.
+- **#8** GPU: unmount disposes all geometries / materials / textures, not just the renderer.
+- **#9** assets: `hero.png`, `react.svg`, `vite.svg`, `icons.svg` deleted.
+- **#10** dead code: `.type`, `scoreRef`, `levelIndexRef`, `App.css`, and the unreachable `reset()` branch removed.
+- **#11** comment: `pool.js` corrected to `100`.
+- **#12** dev audit: `npm audit fix` applied (prod gate clean). 5 dev-only highs remain in ESLint's transitive `minimatch`; clearing them requires a breaking pre-release ESLint 10 — **deferred** as not worth the risk.
+- **#13** CI audit: switched to `--audit-level=high`.
+- **#14** DPR: drawing buffer sized to displayed CSS × DPR, re-synced via `ResizeObserver`.
+- **#15** allocations: shared scratch `Vector3`; duplicate cobra texture removed.
+
+The original findings are retained below as the record; the empirical baseline is the **pre-fix** state.
+
 ## Rating scale
 
 | Severity | Meaning |
@@ -15,7 +45,7 @@ Method: static review + empirical run of lint / tests / build / audit on the cur
 
 Effort: S (<30 min) · M (½–2 h) · L (>2 h)
 
-## Empirical baseline (measured, not asserted)
+## Empirical baseline (measured at audit time — pre-fix)
 
 | Check | Result |
 |-------|--------|

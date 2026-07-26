@@ -1,14 +1,16 @@
 /**
  * Unit tests for core snake game mechanics.
  *
- * These tests exercise the pure-logic layer: constants, direction vectors,
- * level progression math, and the stateless helper functions that power the
- * game loop.  React rendering and hook side-effects are intentionally NOT
- * covered here — see useSnake.test.jsx for integration-level hook tests.
+ * These exercise the REAL, shipped pure-logic layer — the rule helpers in
+ * logic.js, the ring buffer in pool.js, and randomFood from the hook — rather
+ * than re-implementations. Hook side-effects live in useSnake.test.jsx; component
+ * rendering lives in components.test.jsx.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { COLS, ROWS, LEVELS, DIR } from '../constants';
+import { isReversal, isSameDir, nextHead, isWall, levelForScore } from '../logic';
 import { segPool, POOL_SIZE, initPool, poolGet, poolPrepend } from '../pool';
+import { randomFood } from '../hooks/useSnake';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,54 +75,7 @@ describe('DIR vectors', () => {
   });
 });
 
-// ─── Pure game-logic helpers ──────────────────────────────────────────────────
-// These functions are extracted / re-implemented here as pure functions so they
-// can be tested without mounting the hook.  They must stay in sync with the
-// implementations in useSnake.js and the tick loop in useSnake.js.
-
-/**
- * Returns true if `newDir` is a 180° reversal of `curDir`.
- * Mirrors the guard inside tick() and applyDir().
- */
-function isReversal(curDir, newDir) {
-  return newDir.x === -curDir.x && newDir.y === -curDir.y;
-}
-
-/**
- * Compute the head position after moving one step.
- * Mirrors the head computation inside tick().
- */
-function nextHead(head, dir) {
-  return { x: head.x + dir.x, y: head.y + dir.y };
-}
-
-/**
- * Returns true if the head is outside the board boundaries.
- * Mirrors the wall-collision check in tick().
- */
-function isWallCollision(head) {
-  return head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS;
-}
-
-/**
- * Returns true if the head occupies any segment of the snake body.
- * Mirrors the self-collision check in tick().
- */
-function isSelfCollision(head, snake) {
-  return snake.some(s => s.x === head.x && s.y === head.y);
-}
-
-/**
- * Determine which level index a given score maps to.
- * Mirrors the while-loop inside tick() that handles level-up.
- */
-function levelForScore(score) {
-  let lvl = 0;
-  while (lvl < LEVELS.length - 1 && score >= LEVELS[lvl].scoreNext) lvl++;
-  return lvl;
-}
-
-// ── Reversal detection ────────────────────────────────────────────────────────
+// ─── Reversal detection (logic.js) ─────────────────────────────────────────────
 
 describe('isReversal', () => {
   it('detects right→left as a reversal', () => {
@@ -152,7 +107,21 @@ describe('isReversal', () => {
   });
 });
 
-// ── Head movement ─────────────────────────────────────────────────────────────
+// ─── Same-direction detection (logic.js) ───────────────────────────────────────
+
+describe('isSameDir', () => {
+  it('true for identical vectors', () => {
+    expect(isSameDir(DIR.UP, DIR.UP)).toBe(true);
+    expect(isSameDir(DIR.RIGHT, DIR.RIGHT)).toBe(true);
+  });
+
+  it('false for different vectors', () => {
+    expect(isSameDir(DIR.UP, DIR.DOWN)).toBe(false);
+    expect(isSameDir(DIR.LEFT, DIR.UP)).toBe(false);
+  });
+});
+
+// ─── Head movement (logic.js) ──────────────────────────────────────────────────
 
 describe('nextHead', () => {
   it('moves right by one cell', () => {
@@ -172,53 +141,33 @@ describe('nextHead', () => {
   });
 });
 
-// ── Wall collision ────────────────────────────────────────────────────────────
+// ─── Wall collision (logic.js) ─────────────────────────────────────────────────
 
-describe('isWallCollision', () => {
+describe('isWall', () => {
   it('no collision inside the board', () => {
-    expect(isWallCollision({ x: 0, y: 0 })).toBe(false);
-    expect(isWallCollision({ x: COLS - 1, y: ROWS - 1 })).toBe(false);
-    expect(isWallCollision({ x: 5, y: 5 })).toBe(false);
+    expect(isWall(0, 0)).toBe(false);
+    expect(isWall(COLS - 1, ROWS - 1)).toBe(false);
+    expect(isWall(5, 5)).toBe(false);
   });
 
   it('left wall: x < 0', () => {
-    expect(isWallCollision({ x: -1, y: 5 })).toBe(true);
+    expect(isWall(-1, 5)).toBe(true);
   });
 
   it('right wall: x >= COLS', () => {
-    expect(isWallCollision({ x: COLS, y: 5 })).toBe(true);
+    expect(isWall(COLS, 5)).toBe(true);
   });
 
   it('top wall: y < 0', () => {
-    expect(isWallCollision({ x: 5, y: -1 })).toBe(true);
+    expect(isWall(5, -1)).toBe(true);
   });
 
   it('bottom wall: y >= ROWS', () => {
-    expect(isWallCollision({ x: 5, y: ROWS })).toBe(true);
+    expect(isWall(5, ROWS)).toBe(true);
   });
 });
 
-// ── Self collision ────────────────────────────────────────────────────────────
-
-describe('isSelfCollision', () => {
-  const snake = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
-
-  it('detects collision when head lands on a body segment', () => {
-    expect(isSelfCollision({ x: 4, y: 5 }, snake)).toBe(true);
-    expect(isSelfCollision({ x: 3, y: 5 }, snake)).toBe(true);
-  });
-
-  it('no collision when head is on an empty cell', () => {
-    expect(isSelfCollision({ x: 6, y: 5 }, snake)).toBe(false);
-    expect(isSelfCollision({ x: 5, y: 6 }, snake)).toBe(false);
-  });
-
-  it('no collision with an empty snake array', () => {
-    expect(isSelfCollision({ x: 0, y: 0 }, [])).toBe(false);
-  });
-});
-
-// ── Object pool (ring buffer) ─────────────────────────────────────────────────
+// ─── Object pool (ring buffer) ─────────────────────────────────────────────────
 
 describe('pool', () => {
   const SEGS = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
@@ -292,7 +241,7 @@ describe('pool', () => {
   });
 });
 
-// ── Level progression ─────────────────────────────────────────────────────────
+// ─── Level progression (logic.js) ──────────────────────────────────────────────
 
 describe('levelForScore', () => {
   it('score 0 → level 0 (EASY)', () => {
@@ -321,5 +270,39 @@ describe('levelForScore', () => {
       // Exactly at the threshold: should be at the *next* level
       expect(levelForScore(lvl.scoreNext)).toBe(i + 1);
     });
+  });
+});
+
+// ─── Food placement (real randomFood from the hook) ────────────────────────────
+
+describe('randomFood', () => {
+  const SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
+
+  beforeEach(() => {
+    initPool(SNAKE);
+  });
+
+  it('never places food on a snake cell and stays inside the board', () => {
+    const onSnake = (f) => SNAKE.some(s => s.x === f.x && s.y === f.y);
+    for (let n = 0; n < 300; n++) {
+      const f = randomFood(0, SNAKE.length);
+      expect(f).not.toBeNull();
+      expect(onSnake(f)).toBe(false);
+      expect(f.x).toBeGreaterThanOrEqual(0);
+      expect(f.x).toBeLessThan(COLS);
+      expect(f.y).toBeGreaterThanOrEqual(0);
+      expect(f.y).toBeLessThan(ROWS);
+    }
+  });
+
+  it('returns a plain {x, y} with no vestigial fruit type', () => {
+    expect(Object.keys(randomFood(0, SNAKE.length)).sort()).toEqual(['x', 'y']);
+  });
+
+  it('returns null when every cell is occupied (board full)', () => {
+    const all = [];
+    for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) all.push({ x, y });
+    initPool(all);
+    expect(randomFood(0, POOL_SIZE)).toBeNull();
   });
 });

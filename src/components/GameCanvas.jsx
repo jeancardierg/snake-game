@@ -21,13 +21,13 @@ import { segPool, POOL_SIZE } from '../pool';
 const SIZE = COLS * CELL;   // 200 logical units
 const HALF = SIZE / 2;      // 100
 
-// Map grid cell (col, row) to world XZ position (Y=height)
-function cellToWorld(col, row, height = 0) {
-  return new THREE.Vector3(
-    col * CELL - HALF + CELL / 2,
-    height,
-    row * CELL - HALF + CELL / 2,
-  );
+// Map grid cell (col, row) to world XZ position (Y=height).
+// Pass `target` to write into a reused vector and avoid per-frame allocation;
+// omit it (rare paths, e.g. the eat burst) to get a fresh Vector3.
+function cellToWorld(col, row, height = 0, target) {
+  const x = col * CELL - HALF + CELL / 2;
+  const z = row * CELL - HALF + CELL / 2;
+  return target ? target.set(x, height, z) : new THREE.Vector3(x, height, z);
 }
 
 // ─── Procedural cobra textures ────────────────────────────────────────────────
@@ -88,11 +88,9 @@ function makeCobraHeadTexture() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, stateRef, scoreRef }) { // eslint-disable-line no-unused-vars
-  const canvasRef     = useRef(null);
-  const color         = LEVELS[levelIndex]?.color ?? '#4ecca3';
-  const levelIndexRef = useRef(levelIndex);
-  useEffect(() => { levelIndexRef.current = levelIndex; }, [levelIndex]);
+export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, stateRef }) {
+  const canvasRef = useRef(null);
+  const color     = LEVELS[levelIndex]?.color ?? '#4ecca3';
 
   const animRef = useRef({
     prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1,
@@ -107,10 +105,26 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     // ── Renderer ─────────────────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
-    renderer.setSize(SIZE, SIZE, false);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+
+    // Size the drawing buffer to the canvas's actual displayed size × DPR, so the
+    // board is genuinely crisp instead of a fixed 200 px buffer upscaled by CSS.
+    // The orthographic frustum is in world units (±HALF) and the canvas is square,
+    // so only the pixel resolution changes here — never the framing.
+    const resize = () => {
+      const css = canvas.clientWidth || SIZE;
+      renderer.setPixelRatio(window.devicePixelRatio || 1);
+      renderer.setSize(css, css, false); // false → leave CSS size (100%) untouched
+    };
+    resize();
+
+    let resizeObs;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObs = new ResizeObserver(resize);
+      resizeObs.observe(canvas);
+    }
+    window.addEventListener('resize', resize);
 
     // ── Scene ─────────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
@@ -175,8 +189,6 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     const cobraBodyTex = makeCobraBodyTexture();
     const cobraHeadTex = makeCobraHeadTexture();
-    const cobraConnTex = makeCobraBodyTexture();
-    cobraConnTex.repeat.set(1, 1);
 
     const bodyMat = new THREE.MeshPhongMaterial({
       map: cobraBodyTex,
@@ -185,8 +197,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       shininess: 35,
       emissive: new THREE.Color(0x0a1806),
     });
+    // Connectors reuse the same body texture (clone kept for future divergence).
     const connMat = bodyMat.clone();
-    connMat.map = cobraConnTex;
     const headMat = new THREE.MeshPhongMaterial({
       map: cobraHeadTex,
       color:    0x2a4a16,
@@ -310,8 +322,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     const pMat    = new THREE.PointsMaterial({ size: 5, vertexColors: true, sizeAttenuation: false, transparent: true });
     scene.add(new THREE.Points(pGeo, pMat));
 
-    const tmpColor  = new THREE.Color();
-    const EXPLODE_C = new THREE.Color(0xff4400);
+    const tmpColor   = new THREE.Color();
+    const EXPLODE_C  = new THREE.Color(0xff4400);
+    const scratchVec = new THREE.Vector3(); // reused by cellToWorld each frame
 
     // ── rAF loop ──────────────────────────────────────────────────────────────
     let stopped = false;
@@ -412,7 +425,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
           }
         }
 
-        const wp = cellToWorld(sxF, szF, BODY_Y);
+        const wp = cellToWorld(sxF, szF, BODY_Y, scratchVec);
         iSegX[i] = wp.x;
         iSegZ[i] = wp.z;
         mesh.position.set(wp.x, wp.y, wp.z);
@@ -436,7 +449,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       }
 
       // ── Head ──────────────────────────────────────────────────────────────
-      const hwp = cellToWorld(hxF, hyF, HEAD_Y);
+      const hwp = cellToWorld(hxF, hyF, HEAD_Y, scratchVec);
       headMesh.position.set(hwp.x, hwp.y, hwp.z);
       iSegX[0] = hwp.x;
       iSegZ[0] = hwp.z;
@@ -466,7 +479,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       }
 
       // ── Mine (food) ────────────────────────────────────────────────────────
-      const mwp = cellToWorld(food.x, food.y, MINE_Y);
+      const mwp = cellToWorld(food.x, food.y, MINE_Y, scratchVec);
       mineGroup.position.set(mwp.x, mwp.y, mwp.z);
       mineGroup.rotation.y += 0.012;
       mineGroup.visible = true;
@@ -501,6 +514,21 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     return () => {
       stopped = true;
       cancelAnimationFrame(rafId);
+      resizeObs?.disconnect();
+      window.removeEventListener('resize', resize);
+      // renderer.dispose() does NOT free scene geometries, materials, or
+      // textures. Traverse and dispose them explicitly so nothing leaks on
+      // unmount / StrictMode remount.
+      scene.traverse((obj) => {
+        obj.geometry?.dispose?.();
+        const mat = obj.material;
+        if (mat) {
+          (Array.isArray(mat) ? mat : [mat]).forEach((m) => {
+            m.map?.dispose?.();
+            m.dispose?.();
+          });
+        }
+      });
       renderer.dispose();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

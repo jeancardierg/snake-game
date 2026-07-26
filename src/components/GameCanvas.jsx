@@ -142,7 +142,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     scene.add(fill);
 
     // ── Ground plane ─────────────────────────────────────────────────────────
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x1e1508 });
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0xd3d3d3 });
     const ground    = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;

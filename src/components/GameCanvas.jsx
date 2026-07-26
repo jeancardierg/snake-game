@@ -123,10 +123,10 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     cam.lookAt(0, 0, 0);
 
     // ── Lighting ─────────────────────────────────────────────────────────────
-    const ambient = new THREE.AmbientLight(0xff5500, 0.25);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.25);
     scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xff3300, 0.7);
+    const sun = new THREE.DirectionalLight(0xffffff, 0.7);
     sun.position.set(-80, 180, -60);
     sun.castShadow = true;
     sun.shadow.camera.left   = -120;
@@ -142,7 +142,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     scene.add(fill);
 
     // ── Ground plane ─────────────────────────────────────────────────────────
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0xd3d3d3 });
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0xd3d3d3, emissive: 0xc0c0c0 });
     const ground    = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;

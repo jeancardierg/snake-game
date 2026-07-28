@@ -71,6 +71,31 @@ body {
   border-radius: 20px;
   border: 1px solid;
 }
+/* Center column of the scoreboard: difficulty badge + pause button stacked */
+.level-card-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.level-pause-btn {
+  padding: 3px 12px;
+  background: #1e1e2e;
+  border: 1px solid;
+  border-radius: 12px;
+  color: #ccc;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.level-pause-btn:hover:not(:disabled) { background: #2e2e3e; color: #fff; }
+.level-pause-btn:disabled { opacity: 0.4; cursor: default; }
+.level-pause-btn:focus-visible {
+  outline: 2px solid #4ecca3;
+  outline-offset: 2px;
+}
 
 /* ── Level progress bar ── */
 .level-bar-wrap {

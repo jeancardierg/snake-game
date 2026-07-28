@@ -71,7 +71,7 @@ export default function App() {
   return (
     <div className="app">
       {/* Top bar: score + level badge + best */}
-      <Scoreboard score={score} best={best} levelIndex={levelIndex} />
+      <Scoreboard score={score} best={best} levelIndex={levelIndex} state={state} onPause={pause} />
 
       {/* Progress bar toward next speed level */}
       <LevelBar score={score} levelIndex={levelIndex} />

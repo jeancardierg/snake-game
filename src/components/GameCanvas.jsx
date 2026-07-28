@@ -2,8 +2,11 @@
  * GameCanvas — WebGL renderer using three.js.
  *
  * Draws the snake game board in full 3D with:
- *   - King Cobra body: procedural canvas texture with chevron banding,
- *     continuous cylinder connectors between sphere joints, hood flare on head
+ *   - Snake body: one continuous, tapered tube generated each frame from a
+ *     Catmull-Rom spline through the interpolated segment centers, with a
+ *     subtle lateral "slither" wave (amplitude ramps from 0 at the head so the
+ *     head stays grid-accurate) and glossy procedural scale texture
+ *   - Sleek wedge head oriented along the body, with eyes + a flicking tongue
  *   - Mine food: dark metallic sphere with spike protrusions and blinking
  *     red detonator
  *   - Grass-green ground plane + grid lines
@@ -12,6 +15,10 @@
  *
  * All game state is read from refs every frame (no React reconciliation per tick).
  * The three.js scene is created once on mount and torn down on unmount.
+ *
+ * Rendering-only module: game logic (useSnake.js) is untouched. The slither and
+ * smooth tube are a visual layer over the existing grid path — the head always
+ * resolves to its exact cell so food/eat alignment is preserved.
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
@@ -21,69 +28,92 @@ import { segPool, POOL_SIZE } from '../pool';
 const SIZE = COLS * CELL;   // 200 logical units
 const HALF = SIZE / 2;      // 100
 
+// Grid cell (col,row) → world X / Z (Y is height). Scalar variants avoid the
+// per-call Vector3 allocation of cellToWorld inside the hot centerline loop.
+function worldX(col) { return col * CELL - HALF + CELL / 2; }
+function worldZ(row) { return row * CELL - HALF + CELL / 2; }
+
 // Map grid cell (col, row) to world XZ position (Y=height)
 function cellToWorld(col, row, height = 0) {
-  return new THREE.Vector3(
-    col * CELL - HALF + CELL / 2,
-    height,
-    row * CELL - HALF + CELL / 2,
-  );
+  return new THREE.Vector3(worldX(col), height, worldZ(row));
 }
 
-// ─── Procedural cobra textures ────────────────────────────────────────────────
+// ─── Procedural snake textures ────────────────────────────────────────────────
 
-function makeCobraBodyTexture() {
+// Glossy emerald scale skin. The V axis (0..1) wraps the circumference: the
+// belly (v=0 / v=1) is light, the dorsal ridge (v=0.5) is dark green. Diamond
+// scales tile along both axes. U repeats along the body length (see ULEN).
+function makeSnakeBodyTexture() {
   const c = document.createElement('canvas');
-  c.width = 64; c.height = 128;
+  c.width = 128; c.height = 128;
   const ctx = c.getContext('2d');
-  // Dark olive base
-  ctx.fillStyle = '#2d4a1e';
-  ctx.fillRect(0, 0, 64, 128);
-  // Cream chevron banding
-  ctx.fillStyle = '#c4b878';
-  for (let row = 0; row < 8; row++) {
-    const y = row * 16 + 4;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(32, y + 6);
-    ctx.lineTo(64, y);
-    ctx.lineTo(64, y + 3);
-    ctx.lineTo(32, y + 9);
-    ctx.lineTo(0, y + 3);
-    ctx.closePath();
-    ctx.fill();
+
+  const g = ctx.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0.00, '#8fe0b0');   // belly (seam)
+  g.addColorStop(0.24, '#2a9d5f');
+  g.addColorStop(0.50, '#0b3a24');   // dorsal ridge (dark)
+  g.addColorStop(0.76, '#2a9d5f');
+  g.addColorStop(1.00, '#8fe0b0');   // belly (seam)
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+
+  // Diamond scale lattice
+  const step = 16;
+  for (let row = 0; row < 128 / step + 1; row++) {
+    for (let col = 0; col < 128 / step + 1; col++) {
+      const cx = col * step + (row % 2 ? step / 2 : 0);
+      const cy = row * step;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - step * 0.5);
+      ctx.lineTo(cx + step * 0.5, cy);
+      ctx.lineTo(cx, cy + step * 0.5);
+      ctx.lineTo(cx - step * 0.5, cy);
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(3,20,12,0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      // top-left glossy highlight on each scale
+      ctx.beginPath();
+      ctx.moveTo(cx - step * 0.32, cy - step * 0.16);
+      ctx.lineTo(cx, cy - step * 0.42);
+      ctx.strokeStyle = 'rgba(200,255,224,0.30)';
+      ctx.lineWidth = 1.0;
+      ctx.stroke();
+    }
   }
-  // Subtle belly stripe
-  ctx.fillStyle = 'rgba(232,221,184,0.22)';
-  ctx.fillRect(24, 0, 16, 128);
+
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, 1);
   return tex;
 }
 
-function makeCobraHeadTexture() {
+// Sleek head skin: dark dorsal with a lighter angular "brow" chevron.
+function makeSnakeHeadTexture() {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 64;
   const ctx = c.getContext('2d');
-  // Darker olive hood
-  ctx.fillStyle = '#1e3a12';
+
+  const g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0.0, '#0a2a1a');
+  g.addColorStop(0.5, '#12492e');
+  g.addColorStop(1.0, '#0a2a1a');
+  ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
-  // Hood spectacle marking (cream V-shape)
-  ctx.strokeStyle = '#c4b878';
+
+  // Brow chevron pointing forward
+  ctx.strokeStyle = '#9fe8c0';
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(16, 20);
-  ctx.lineTo(32, 40);
-  ctx.lineTo(48, 20);
+  ctx.moveTo(14, 40);
+  ctx.lineTo(32, 16);
+  ctx.lineTo(50, 40);
   ctx.stroke();
-  // Eye-spot circles on hood
-  ctx.fillStyle = '#c4b878';
-  ctx.beginPath(); ctx.arc(22, 24, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(42, 24, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#1e3a12';
-  ctx.beginPath(); ctx.arc(22, 24, 2.5, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(42, 24, 2.5, 0, Math.PI * 2); ctx.fill();
+
+  // Fine dorsal scale flecks
+  ctx.fillStyle = 'rgba(6,26,16,0.5)';
+  for (let i = 0; i < 40; i++) {
+    ctx.fillRect((i * 17) % 64, (i * 29) % 64, 2, 2);
+  }
   return new THREE.CanvasTexture(c);
 }
 
@@ -99,6 +129,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     lastTickMs: null, interpDuration: 270,
     prevFood: null, prevState: 'idle',
     particles: [], shake: null,
+    slitherT: 0, lastFrameMs: null,   // slither wave phase (advances only while running)
   });
 
   useEffect(() => {
@@ -169,94 +200,113 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       ));
     }
 
-    // ── Snake materials (cobra textured) ──────────────────────────────────────
-    const BODY_R = CELL * 0.38;
-    const HEAD_R = CELL * 0.41;
-    const BODY_Y = BODY_R * 0.55;
-    const HEAD_Y = HEAD_R * 0.60;
+    // ── Snake dimensions / materials ──────────────────────────────────────────
+    const BODY_R   = CELL * 0.34;   // max tube radius (neck)
+    const HEAD_R   = CELL * 0.44;
+    const CENTER_Y = BODY_R;        // tube centerline height → rests on ground
+    const HEAD_Y   = HEAD_R * 0.75;
 
-    const cobraBodyTex = makeCobraBodyTexture();
-    const cobraHeadTex = makeCobraHeadTexture();
-    const cobraConnTex = makeCobraBodyTexture();
-    cobraConnTex.repeat.set(1, 1);
+    const bodyTex = makeSnakeBodyTexture();
+    const headTex = makeSnakeHeadTexture();
 
     const bodyMat = new THREE.MeshPhongMaterial({
-      map: cobraBodyTex,
-      color:    0x3a5a20,
-      specular: 0x304a18,
-      shininess: 35,
-      emissive: new THREE.Color(0x0a1806),
+      map: bodyTex,
+      color:     0xffffff,
+      specular:  0xaef0cc,
+      shininess: 90,
+      emissive:  new THREE.Color(0x04140c),
     });
-    const connMat = bodyMat.clone();
-    connMat.map = cobraConnTex;
     const headMat = new THREE.MeshPhongMaterial({
-      map: cobraHeadTex,
-      color:    0x2a4a16,
-      specular: 0x40701e,
-      shininess: 50,
-      emissive: new THREE.Color(0x060e04),
+      map: headTex,
+      color:     0xffffff,
+      specular:  0xbaf8d4,
+      shininess: 110,
+      emissive:  new THREE.Color(0x06180e),
     });
 
-    // ── Segment sphere pool ───────────────────────────────────────────────────
-    const bodyGeo   = new THREE.SphereGeometry(BODY_R, 18, 12);
-    const segMeshes = Array.from({ length: POOL_SIZE }, () => {
-      const m = new THREE.Mesh(bodyGeo, bodyMat);
-      m.castShadow = true;
-      m.visible    = false;
-      scene.add(m);
-      return m;
-    });
+    // ── Body tube (regenerated in place each frame) ───────────────────────────
+    // Fixed vertex/index capacity; the active length is controlled per frame via
+    // setDrawRange. Vertices are laid out ring-major (ring i occupies RAD slots),
+    // so the index list for the first (N-1) ring gaps is a contiguous prefix of
+    // the full precomputed index list — no per-frame index rebuild, no leaks.
+    const RAD       = 10;                       // radial segments per ring
+    const MAX_RINGS = 180;                       // capacity (rings along length)
+    const A_MAX     = CELL * 0.15;               // max slither amplitude (grid-accurate)
+    const WAVES     = 1.6;                        // wave count along the body
 
-    // ── Connector cylinder pool (links adjacent segments) ─────────────────────
-    const CONN_R    = BODY_R * 0.92;
-    const connGeo   = new THREE.CylinderGeometry(CONN_R, CONN_R, CELL, 12);
-    const connMeshes = Array.from({ length: POOL_SIZE }, () => {
-      const m = new THREE.Mesh(connGeo, connMat);
-      m.castShadow = true;
-      m.visible    = false;
-      scene.add(m);
-      return m;
-    });
+    const tPos = new Float32Array(MAX_RINGS * RAD * 3);
+    const tNor = new Float32Array(MAX_RINGS * RAD * 3);
+    const tUv  = new Float32Array(MAX_RINGS * RAD * 2);
+    const tIdx = new Uint16Array((MAX_RINGS - 1) * RAD * 6);
+    {
+      let k = 0;
+      for (let i = 0; i < MAX_RINGS - 1; i++) {
+        for (let j = 0; j < RAD; j++) {
+          const a = i * RAD + j;
+          const b = i * RAD + ((j + 1) % RAD);
+          const cc = (i + 1) * RAD + j;
+          const d = (i + 1) * RAD + ((j + 1) % RAD);
+          tIdx[k++] = a; tIdx[k++] = cc; tIdx[k++] = b;
+          tIdx[k++] = b; tIdx[k++] = cc; tIdx[k++] = d;
+        }
+      }
+    }
+    const bodyGeom = new THREE.BufferGeometry();
+    bodyGeom.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+    bodyGeom.setAttribute('normal',   new THREE.BufferAttribute(tNor, 3));
+    bodyGeom.setAttribute('uv',       new THREE.BufferAttribute(tUv, 2));
+    bodyGeom.setIndex(new THREE.BufferAttribute(tIdx, 1));
+    const bodyMesh = new THREE.Mesh(bodyGeom, bodyMat);
+    bodyMesh.castShadow = true;
+    scene.add(bodyMesh);
 
-    // ── Head mesh with cobra hood ─────────────────────────────────────────────
-    const headGeo  = new THREE.SphereGeometry(HEAD_R, 22, 16);
+    // Spline through segment centers + reusable scratch buffers (zero per-frame GC)
+    const centerline  = Array.from({ length: POOL_SIZE }, () => new THREE.Vector3());
+    const curvePoints = [];
+    const curve       = new THREE.CatmullRomCurve3([new THREE.Vector3(), new THREE.Vector3()]);
+    curve.curveType   = 'centripetal';
+    const scP         = new THREE.Vector3();
+    const bx          = new Float32Array(MAX_RINGS);   // base sample X (pre-slither)
+    const bz          = new Float32Array(MAX_RINGS);   // base sample Z (pre-slither)
+
+    // ── Head mesh (sleek elongated wedge) + eyes + tongue ─────────────────────
+    const headGeo = new THREE.SphereGeometry(HEAD_R, 24, 18);
+    headGeo.scale(0.9, 0.66, 1.35);   // slim, flattened, elongated snout (−Z forward)
     const headMesh = new THREE.Mesh(headGeo, headMat);
     headMesh.castShadow = true;
     scene.add(headMesh);
 
-    // Hood flare (flattened sphere behind head)
-    const hoodGeo  = new THREE.SphereGeometry(HEAD_R * 0.85, 16, 12);
-    const hoodMesh = new THREE.Mesh(hoodGeo, headMat);
-    hoodMesh.scale.set(1.1, 0.2, 0.9);
-    hoodMesh.position.set(0, -HEAD_R * 0.1, HEAD_R * 0.5);
-    headMesh.add(hoodMesh);
-
-    // Eyes (parented to head)
+    // Eyes (parented to head; forward is −Z)
     const eyeGeo   = new THREE.SphereGeometry(2.2, 10, 7);
-    const eyeMat   = new THREE.MeshPhongMaterial({ color: 0xd4b820, emissive: new THREE.Color(0x302000), shininess: 80 });
-    const pupilGeo = new THREE.SphereGeometry(1.1, 8, 6);
+    const eyeMat   = new THREE.MeshPhongMaterial({ color: 0xf2d21a, emissive: new THREE.Color(0x352600), shininess: 90 });
+    const pupilGeo = new THREE.SphereGeometry(1.05, 8, 6);
     const pupilMat = new THREE.MeshBasicMaterial({ color: 0x060606 });
-
     for (const s of [-1, 1]) {
       const eye   = new THREE.Mesh(eyeGeo, eyeMat);
       const pupil = new THREE.Mesh(pupilGeo, pupilMat);
-      eye.position.set(s * HEAD_R * 0.55, HEAD_R * 0.30, -HEAD_R * 0.72);
+      eye.position.set(s * HEAD_R * 0.5, HEAD_R * 0.28, -HEAD_R * 0.62);
       pupil.position.set(0, 0, eyeGeo.parameters.radius * 0.85);
       eye.add(pupil);
       headMesh.add(eye);
     }
 
-    // Head-to-first-body connector (special, uses interpolated position)
-    const headConnGeo  = new THREE.CylinderGeometry(CONN_R, CONN_R, CELL, 12);
-    const headConnMesh = new THREE.Mesh(headConnGeo, bodyMat);
-    headConnMesh.castShadow = true;
-    headConnMesh.visible    = false;
-    scene.add(headConnMesh);
-
-    // ── Interpolated world-position buffers (reused each frame) ──────────────
-    // iSegX[i] / iSegZ[i] store the smoothed world X/Z for snake segment i
-    const iSegX = new Float32Array(POOL_SIZE + 1);
-    const iSegZ = new Float32Array(POOL_SIZE + 1);
+    // Flicking forked tongue (parented to head, extends from the snout tip)
+    const tongueMat  = new THREE.MeshBasicMaterial({ color: 0xd11a2a });
+    const tongue     = new THREE.Group();
+    const tongueBase = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 5, 6), tongueMat);
+    tongueBase.rotation.x = Math.PI / 2;   // align along Z
+    tongueBase.position.z = -2.5;
+    tongue.add(tongueBase);
+    const prongGeo = new THREE.CylinderGeometry(0.45, 0.12, 4, 5);
+    for (const s of [-1, 1]) {
+      const prong = new THREE.Mesh(prongGeo, tongueMat);
+      prong.rotation.x = Math.PI / 2;
+      prong.rotation.y = s * 0.35;
+      prong.position.set(s * 0.9, 0, -6);
+      tongue.add(prong);
+    }
+    tongue.position.set(0, HEAD_R * 0.05, -HEAD_R * 1.15);
+    headMesh.add(tongue);
 
     // ── Mine mesh (food) ──────────────────────────────────────────────────────
     const MINE_R = CELL * 0.35;
@@ -315,6 +365,57 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     const tmpColor  = new THREE.Color();
     const EXPLODE_C = new THREE.Color(0xff4400);
 
+    // ── Tube builder ──────────────────────────────────────────────────────────
+    // Samples the current spline at N rings, applies the slither offset + taper,
+    // and writes positions/normals/uvs in place. `ulen` scales scale-banding
+    // along the body length.
+    const buildTube = (N, slitherT, ulen) => {
+      // Pass 1: base centerline samples (pre-slither) in XZ
+      for (let i = 0; i < N; i++) {
+        curve.getPoint(i / (N - 1), scP);
+        bx[i] = scP.x; bz[i] = scP.z;
+      }
+      // Pass 2: tangent → perpendicular → slither offset → ring of RAD verts
+      for (let i = 0; i < N; i++) {
+        const s  = i / (N - 1);
+        const i0 = Math.max(0, i - 1);
+        const i1 = Math.min(N - 1, i + 1);
+        let tx = bx[i1] - bx[i0];
+        let tz = bz[i1] - bz[i0];
+        const tl = Math.hypot(tx, tz) || 1;
+        tx /= tl; tz /= tl;
+        const px = -tz, pz = tx;                       // horizontal perpendicular
+
+        const amp = A_MAX * Math.min(1, s / 0.25);     // 0 at head → full by 25%
+        const off = amp * Math.sin(s * WAVES * Math.PI * 2 - slitherT * 0.006);
+        const cx  = bx[i] + px * off;
+        const cz  = bz[i] + pz * off;
+
+        // Radius: taper neck→tail, round the very tip to a point
+        let R = BODY_R * (1 - 0.72 * s);
+        R *= Math.min(1, (1 - s) / 0.06);
+
+        const base = i * RAD;
+        for (let j = 0; j < RAD; j++) {
+          const th = (j / RAD) * Math.PI * 2;
+          const ct = Math.cos(th), st = Math.sin(th);
+          const nx = ct * px, ny = st, nz = ct * pz;   // radial (= normal) dir
+          const vi = (base + j) * 3;
+          tPos[vi]     = cx + nx * R;
+          tPos[vi + 1] = CENTER_Y + ny * R;
+          tPos[vi + 2] = cz + nz * R;
+          tNor[vi]     = nx; tNor[vi + 1] = ny; tNor[vi + 2] = nz;
+          const ui = (base + j) * 2;
+          tUv[ui]     = s * ulen;
+          tUv[ui + 1] = j / RAD;
+        }
+      }
+      bodyGeom.attributes.position.needsUpdate = true;
+      bodyGeom.attributes.normal.needsUpdate   = true;
+      bodyGeom.attributes.uv.needsUpdate        = true;
+      bodyGeom.setDrawRange(0, (N - 1) * RAD * 6);
+    };
+
     // ── rAF loop ──────────────────────────────────────────────────────────────
     let stopped = false;
     let rafId;
@@ -327,6 +428,11 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       const headIdx  = headIdxRef.current;
       const snakeLen = snakeLenRef.current;
       const state    = stateRef.current;
+
+      // Advance slither phase only while actively moving (freeze when idle/paused/dead)
+      const dt = anim.lastFrameMs === null ? 16 : now - anim.lastFrameMs;
+      anim.lastFrameMs = now;
+      if (state === 'running') anim.slitherT += dt;
 
       // ── Head interpolation ────────────────────────────────────────────────
       const head = segPool[headIdx % POOL_SIZE];
@@ -391,20 +497,13 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
         eatLight.intensity = Math.max(0, eatLight.intensity - 0.2);
       }
 
-      // ── Body segments + connectors ─────────────────────────────────────────
-      for (const m of segMeshes) m.visible = false;
-      for (const m of connMeshes) m.visible = false;
-      headConnMesh.visible = false;
-
+      // ── Build snake centerline (head → tail), interpolated ──────────────────
+      centerline[0].set(worldX(hxF), CENTER_Y, worldZ(hyF));
       for (let i = 1; i < snakeLen; i++) {
-        const seg  = segPool[(headIdx + i) % POOL_SIZE];
-        const mesh = segMeshes[(headIdx + i) % POOL_SIZE];
-
-        // Interpolate each segment from its previous position (ring slot i+1) toward current.
-        // Ring slot i+1 held this segment's position before the latest tick.
-        // Tail segment (i === snakeLen-1) is not interpolated — ring slot beyond tail is stale.
+        const seg = segPool[(headIdx + i) % POOL_SIZE];
         let sxF = seg.x, szF = seg.y;
         if (i < snakeLen - 1) {
+          // Ring slot i+1 held this segment's position before the latest tick.
           const prev = segPool[(headIdx + i + 1) % POOL_SIZE];
           const sdx  = seg.x - prev.x;
           const sdz  = seg.y - prev.y;
@@ -413,36 +512,24 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
             szF = prev.y + sdz * tE;
           }
         }
-
-        const wp = cellToWorld(sxF, szF, BODY_Y);
-        iSegX[i] = wp.x;
-        iSegZ[i] = wp.z;
-        mesh.position.set(wp.x, wp.y, wp.z);
-        mesh.visible = true;
-
-        // Connector between this segment and the one ahead of it (both interpolated)
-        if (i >= 2) {
-          const adx = iSegX[i - 1] - iSegX[i];
-          const adz = iSegZ[i - 1] - iSegZ[i];
-          if (Math.abs(adx) < CELL * 1.5 && Math.abs(adz) < CELL * 1.5 && (adx !== 0 || adz !== 0)) {
-            const conn = connMeshes[(headIdx + i) % POOL_SIZE];
-            conn.position.set((iSegX[i] + iSegX[i - 1]) / 2, BODY_Y, (iSegZ[i] + iSegZ[i - 1]) / 2);
-            conn.rotation.set(
-              Math.abs(adx) <= Math.abs(adz) ? Math.PI / 2 : 0,
-              0,
-              Math.abs(adx) > Math.abs(adz) ? Math.PI / 2 : 0,
-            );
-            conn.visible = true;
-          }
-        }
+        centerline[i].set(worldX(sxF), CENTER_Y, worldZ(szF));
       }
 
-      // ── Head ──────────────────────────────────────────────────────────────
+      // Fit spline and rebuild the tube (needs ≥2 points; snake is always ≥3)
+      if (snakeLen >= 2) {
+        curvePoints.length = snakeLen;
+        for (let i = 0; i < snakeLen; i++) curvePoints[i] = centerline[i];
+        curve.points = curvePoints;
+        const N = Math.max(8, Math.min(MAX_RINGS, Math.round(snakeLen * 4)));
+        buildTube(N, anim.slitherT, snakeLen * 0.6);
+        bodyMesh.visible = true;
+      } else {
+        bodyMesh.visible = false;
+      }
+
+      // ── Head placement + orientation ────────────────────────────────────────
       const hwp = cellToWorld(hxF, hyF, HEAD_Y);
       headMesh.position.set(hwp.x, hwp.y, hwp.z);
-      iSegX[0] = hwp.x;
-      iSegZ[0] = hwp.z;
-
       if (snakeLen > 1) {
         const neck = segPool[(headIdx + 1) % POOL_SIZE];
         const dx   = head.x - neck.x;
@@ -452,20 +539,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
         if (ndx !== 0 || ndz !== 0) {
           headMesh.rotation.y = Math.atan2(ndx, ndz);
         }
-
-        // Head-to-first-body connector (both ends use interpolated world positions)
-        const adx = iSegX[0] - iSegX[1];
-        const adz = iSegZ[0] - iSegZ[1];
-        if (Math.abs(adx) < CELL * 1.5 && Math.abs(adz) < CELL * 1.5) {
-          headConnMesh.position.set((iSegX[0] + iSegX[1]) / 2, BODY_Y, (iSegZ[0] + iSegZ[1]) / 2);
-          headConnMesh.rotation.set(
-            Math.abs(adx) <= Math.abs(adz) ? Math.PI / 2 : 0,
-            0,
-            Math.abs(adx) > Math.abs(adz) ? Math.PI / 2 : 0,
-          );
-          headConnMesh.visible = true;
-        }
       }
+
+      // Tongue flick: extend for ~180ms roughly every 1.6s while running
+      const flickPhase = (anim.slitherT % 1600) / 1600;
+      const flicking   = state === 'running' && flickPhase < 0.11;
+      tongue.visible   = flicking;
 
       // ── Mine (food) ────────────────────────────────────────────────────────
       const mwp = cellToWorld(food.x, food.y, MINE_Y);
@@ -503,6 +582,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     return () => {
       stopped = true;
       cancelAnimationFrame(rafId);
+      bodyGeom.dispose();
       renderer.dispose();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

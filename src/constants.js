@@ -13,7 +13,7 @@ export const LEVELS = [
   { label: 'MEDIUM', speed: 220, scoreNext: 120,      color: '#a0e060' },
   { label: 'FAST',   speed: 160, scoreNext: 220,      color: '#f0c040' },
   { label: 'HYPER',  speed: 110, scoreNext: 360,      color: '#f07030' },
-  { label: 'INSANE', speed: 75,  scoreNext: Infinity, color: '#e03060' },
+  { label: 'INSANE', speed: 45,  scoreNext: Infinity, color: '#e03060' },
   // speed = setInterval delay in ms (lower = faster)
   // color  = snake body color + UI accent for that level
 ];

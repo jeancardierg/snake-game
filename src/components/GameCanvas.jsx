@@ -40,24 +40,34 @@ function cellToWorld(col, row, height = 0) {
 
 // ─── Procedural snake textures ────────────────────────────────────────────────
 
-// Glossy emerald scale skin. The V axis (0..1) wraps the circumference: the
-// belly (v=0 / v=1) is light, the dorsal ridge (v=0.5) is dark green. Diamond
-// scales tile along both axes. U repeats along the body length (see ULEN).
+// Coral / milk-snake banded skin: scarlet-red bands + black bands each bordered
+// by pale-cream rings, repeating along the body. The texture's X axis maps to
+// body length (uv.x = s·ulen) and Y to circumference (uv.y), so a band that
+// rings the body is a full-height vertical stripe. The tile starts and ends on
+// red so the RepeatWrapping seam is continuous.
+const CORAL_RED   = '#d83b1e';
+const CORAL_BLACK = '#16110e';
+const CORAL_CREAM = '#efe4b4';
 function makeSnakeBodyTexture() {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const ctx = c.getContext('2d');
 
-  const g = ctx.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0.00, '#8fe0b0');   // belly (seam)
-  g.addColorStop(0.24, '#2a9d5f');
-  g.addColorStop(0.50, '#0b3a24');   // dorsal ridge (dark)
-  g.addColorStop(0.76, '#2a9d5f');
-  g.addColorStop(1.00, '#8fe0b0');   // belly (seam)
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
+  // Band cycle across the width (fractions of the 128px tile).
+  // red | cream | black | cream | red  → wide red + cream-bordered black.
+  const bands = [
+    [0.00, 0.44, CORAL_RED],
+    [0.44, 0.53, CORAL_CREAM],
+    [0.53, 0.75, CORAL_BLACK],
+    [0.75, 0.84, CORAL_CREAM],
+    [0.84, 1.00, CORAL_RED],
+  ];
+  for (const [x0, x1, col] of bands) {
+    ctx.fillStyle = col;
+    ctx.fillRect(Math.floor(x0 * 128), 0, Math.ceil((x1 - x0) * 128), 128);
+  }
 
-  // Diamond scale lattice
+  // Subtle scale lattice overlay — low alpha so the bands still read clearly.
   const step = 16;
   for (let row = 0; row < 128 / step + 1; row++) {
     for (let col = 0; col < 128 / step + 1; col++) {
@@ -69,15 +79,15 @@ function makeSnakeBodyTexture() {
       ctx.lineTo(cx, cy + step * 0.5);
       ctx.lineTo(cx - step * 0.5, cy);
       ctx.closePath();
-      ctx.strokeStyle = 'rgba(3,20,12,0.55)';
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+      ctx.lineWidth = 1.1;
       ctx.stroke();
-      // top-left glossy highlight on each scale
+      // faint highlight for a scaled sheen
       ctx.beginPath();
-      ctx.moveTo(cx - step * 0.32, cy - step * 0.16);
-      ctx.lineTo(cx, cy - step * 0.42);
-      ctx.strokeStyle = 'rgba(200,255,224,0.30)';
-      ctx.lineWidth = 1.0;
+      ctx.moveTo(cx - step * 0.30, cy - step * 0.15);
+      ctx.lineTo(cx, cy - step * 0.40);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 0.9;
       ctx.stroke();
     }
   }
@@ -87,32 +97,25 @@ function makeSnakeBodyTexture() {
   return tex;
 }
 
-// Sleek head skin: dark dorsal with a lighter angular "brow" chevron.
+// Head skin matching the body: red crown, black snout band, cream ring at the
+// neck end so the head continues the coral banding. Y (0..64) wraps the head
+// circumference; X runs snout(low)→neck(high) along the head length.
 function makeSnakeHeadTexture() {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 64;
   const ctx = c.getContext('2d');
 
-  const g = ctx.createLinearGradient(0, 0, 0, 64);
-  g.addColorStop(0.0, '#0a2a1a');
-  g.addColorStop(0.5, '#12492e');
-  g.addColorStop(1.0, '#0a2a1a');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
+  // Length-wise bands: black snout, cream, red crown, cream neck ring.
+  ctx.fillStyle = CORAL_BLACK; ctx.fillRect(0, 0, 14, 64);   // snout
+  ctx.fillStyle = CORAL_CREAM; ctx.fillRect(14, 0, 6, 64);
+  ctx.fillStyle = CORAL_RED;   ctx.fillRect(20, 0, 34, 64);  // crown
+  ctx.fillStyle = CORAL_CREAM; ctx.fillRect(54, 0, 4, 64);
+  ctx.fillStyle = CORAL_BLACK; ctx.fillRect(58, 0, 6, 64);   // neck edge
 
-  // Brow chevron pointing forward
-  ctx.strokeStyle = '#9fe8c0';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(14, 40);
-  ctx.lineTo(32, 16);
-  ctx.lineTo(50, 40);
-  ctx.stroke();
-
-  // Fine dorsal scale flecks
-  ctx.fillStyle = 'rgba(6,26,16,0.5)';
+  // Fine dark scale flecks over the crown for texture
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
   for (let i = 0; i < 40; i++) {
-    ctx.fillRect((i * 17) % 64, (i * 29) % 64, 2, 2);
+    ctx.fillRect(20 + ((i * 13) % 34), (i * 29) % 64, 2, 2);
   }
   return new THREE.CanvasTexture(c);
 }
@@ -212,16 +215,16 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     const bodyMat = new THREE.MeshPhongMaterial({
       map: bodyTex,
       color:     0xffffff,
-      specular:  0xaef0cc,
-      shininess: 90,
-      emissive:  new THREE.Color(0x04140c),
+      specular:  0x442a22,   // neutral-warm sheen (was green)
+      shininess: 40,          // snake-skin, not glossy plastic
+      emissive:  new THREE.Color(0x000000),
     });
     const headMat = new THREE.MeshPhongMaterial({
       map: headTex,
       color:     0xffffff,
-      specular:  0xbaf8d4,
-      shininess: 110,
-      emissive:  new THREE.Color(0x06180e),
+      specular:  0x4a2c22,
+      shininess: 45,
+      emissive:  new THREE.Color(0x000000),
     });
 
     // ── Body tube (regenerated in place each frame) ───────────────────────────
@@ -278,7 +281,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     // Eyes (parented to head; forward is −Z)
     const eyeGeo   = new THREE.SphereGeometry(2.2, 10, 7);
-    const eyeMat   = new THREE.MeshPhongMaterial({ color: 0xf2d21a, emissive: new THREE.Color(0x352600), shininess: 90 });
+    const eyeMat   = new THREE.MeshPhongMaterial({ color: 0x201810, emissive: new THREE.Color(0x0a0805), shininess: 90 });
     const pupilGeo = new THREE.SphereGeometry(1.05, 8, 6);
     const pupilMat = new THREE.MeshBasicMaterial({ color: 0x060606 });
     for (const s of [-1, 1]) {

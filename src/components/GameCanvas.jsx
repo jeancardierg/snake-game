@@ -6,7 +6,7 @@
  *     continuous cylinder connectors between sphere joints, hood flare on head
  *   - Mine food: dark metallic sphere with spike protrusions and blinking
  *     red detonator
- *   - Desert ground plane + grid lines
+ *   - Grass-green ground plane + grid lines
  *   - Directional sun + ambient + fill lights, PCFSoft shadow map
  *   - Point-light flash on eat, particle burst, camera shake on death
  *
@@ -114,7 +114,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
 
     // ── Scene ─────────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x120a04);
+    scene.background = new THREE.Color(0x2f5e22);  // grass green backdrop (edges)
 
     // ── Camera (orthographic, top-down) ──────────────────────────────────────
     const cam = new THREE.OrthographicCamera(-HALF, HALF, HALF, -HALF, 1, 1000);
@@ -123,10 +123,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     cam.lookAt(0, 0, 0);
 
     // ── Lighting ─────────────────────────────────────────────────────────────
-    const ambient = new THREE.AmbientLight(0xff5500, 0.25);
+    // Daylight-neutral lighting so the grass ground renders true green
+    // (the previous red/orange desert lights would tint green toward brown).
+    const ambient = new THREE.AmbientLight(0xfff6ec, 0.4);
     scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xff3300, 0.7);
+    const sun = new THREE.DirectionalLight(0xfff4e0, 0.85);
     sun.position.set(-80, 180, -60);
     sun.castShadow = true;
     sun.shadow.camera.left   = -120;
@@ -137,12 +139,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     sun.shadow.bias = -0.001;
     scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x445566, 0.15);
+    const fill = new THREE.DirectionalLight(0x6688aa, 0.2);
     fill.position.set(60, 80, 80);
     scene.add(fill);
 
     // ── Ground plane ─────────────────────────────────────────────────────────
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0xd3d3d3 });
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x4a9d3f });  // grass green field
     const ground    = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -163,7 +165,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
       scene.add(new THREE.LineSegments(
         geo,
-        new THREE.LineBasicMaterial({ color: 0x3d1f0a, opacity: 0.25, transparent: true }),
+        new THREE.LineBasicMaterial({ color: 0x2c5518, opacity: 0.25, transparent: true }),
       ));
     }
 

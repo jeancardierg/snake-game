@@ -8,14 +8,16 @@
  * Purely presentational — no logic, no side effects.
  *
  * Props:
- *   score       number  — current game score
- *   best        number  — all-time best score (from localStorage)
- *   levelIndex  number  — index into LEVELS for color and label
+ *   score       number   — current game score
+ *   best        number   — all-time best score (from localStorage)
+ *   levelIndex  number   — index into LEVELS for color and label
+ *   state       string   — game state, drives the pause button label
+ *   onPause     function — toggle pause/resume
  */
 import { useState, useEffect, useRef } from 'react';
 import { LEVELS } from '../constants';
 
-export function Scoreboard({ score, best, levelIndex }) {
+export function Scoreboard({ score, best, levelIndex, state, onPause }) {
   const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
   const level = LEVELS[safeIdx];
 
@@ -41,15 +43,27 @@ export function Scoreboard({ score, best, levelIndex }) {
         </span>
       </div>
 
-      <div
-        className="level-badge"
-        style={{
-          background: level.color + '22',
-          borderColor: level.color,
-          boxShadow: `0 0 8px ${level.color}66`,
-        }}
-      >
-        {level.label}
+      {/* Difficulty badge with a pause button centered directly below it */}
+      <div className="level-card-center">
+        <div
+          className="level-badge"
+          style={{
+            background: level.color + '22',
+            borderColor: level.color,
+            boxShadow: `0 0 8px ${level.color}66`,
+          }}
+        >
+          {level.label}
+        </div>
+        <button
+          className="level-pause-btn"
+          onClick={onPause}
+          disabled={state === 'idle' || state === 'dead'}
+          aria-label={state === 'paused' ? 'Resume game' : 'Pause game'}
+          style={{ borderColor: level.color + '55' }}
+        >
+          {state === 'paused' ? '▶ Resume' : '⏸ Pause'}
+        </button>
       </div>
 
       <div className="score-block">

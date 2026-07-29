@@ -6,7 +6,8 @@
  * e.preventDefault() suppresses the trailing synthetic click event.
  * touch-action:none in CSS (already set) ensures no browser scroll delay.
  */
-import { DIR, LEVELS } from '../constants';
+import { DIR } from '../constants';
+import { getLevel } from '../levels';
 
 // Direction vectors imported from constants so there is a single source of truth.
 const DIRS = [
@@ -22,8 +23,7 @@ const DIRS = [
  *   levelIndex  number           — used to tint the D-Pad accent color per level
  */
 export function DPad({ onDir, levelIndex }) {
-  const safeIdx = Math.min(Math.max(levelIndex ?? 0, 0), LEVELS.length - 1);
-  const level   = LEVELS[safeIdx];
+  const level = getLevel(Math.max(levelIndex ?? 0, 0));
 
   const handlePointerDown = (dir) => (e) => {
     e.preventDefault();

@@ -10,15 +10,15 @@
  * Props:
  *   score       number   — current game score
  *   best        number   — all-time best score (from localStorage)
- *   levelIndex  number   — index into LEVELS for color and label
+ *   levelIndex  number   — level index, resolved through getLevel for color and id
  *   state       string   — game state, drives the pause button label
  *   onPause     function — toggle pause/resume
  */
-import { LEVELS } from '../constants';
+import { getLevel } from '../levels';
 
 export function Scoreboard({ score, best, levelIndex, state, onPause }) {
-  const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
-  const level = LEVELS[safeIdx];
+  // The badge shows the short id ("L07"); the full title would overflow it.
+  const level = getLevel(Math.max(levelIndex ?? 0, 0));
 
   // Flash on each score increase without state or effects: keying the span off
   // `score` remounts it whenever the score changes, which restarts the CSS
@@ -47,8 +47,9 @@ export function Scoreboard({ score, best, levelIndex, state, onPause }) {
             borderColor: level.color,
             boxShadow: `0 0 8px ${level.color}66`,
           }}
+          title={level.title}
         >
-          {level.label}
+          {level.id}
         </div>
         <button
           className="level-pause-btn"

@@ -5,25 +5,34 @@ export const COLS = 10;          // number of columns
 export const ROWS = 10;          // number of rows
 export const CELL = 20;          // pixels per cell (logical, before devicePixelRatio)
 
-// ─── Level definitions ────────────────────────────────────────────────────────
-// Levels are advanced automatically by useSnake when score crosses scoreNext.
-// The final level (INSANE) has scoreNext: Infinity so the player never leaves it.
-export const LEVELS = [
-  { label: 'EASY',   speed: 300, scoreNext: 50,       color: '#4ecca3' },
-  { label: 'MEDIUM', speed: 220, scoreNext: 120,      color: '#a0e060' },
-  { label: 'FAST',   speed: 160, scoreNext: 220,      color: '#f0c040' },
-  { label: 'HYPER',  speed: 110, scoreNext: 360,      color: '#f07030' },
-  { label: 'INSANE', speed: 45,  scoreNext: Infinity, color: '#e03060' },
-  // speed = setInterval delay in ms (lower = faster)
-  // color  = snake body color + UI accent for that level
-];
+// ─── Level curve ──────────────────────────────────────────────────────────────
+// Levels are generated, not enumerated — see levels.js. Progression is endless
+// ("survival"): getLevel(n) is defined for every n, and useSnake advances when
+// the score crosses the current level's threshold.
+//
+// Speed decays geometrically from BASE_SPEED and is clamped at SPEED_FLOOR,
+// so the curve is monotonic and the level-up loop always terminates.
+export const BASE_SPEED  = 300;   // level 0 tick interval in ms
+export const SPEED_DECAY = 0.9;   // multiplier applied per level
+
+// Foods required to clear a level: FOODS_BASE + n * FOODS_PER_LEVEL, capped.
+// Every food is worth 10 points, so this doubles as the score threshold curve.
+export const FOODS_BASE      = 5;
+export const FOODS_PER_LEVEL = 1.5;
+export const FOODS_MAX       = 20;
+
+// Hard cap on obstacle cells per level. On a 10×10 board this is the practical
+// ceiling before layouts start crowding out the growing snake.
+// Layouts are built from 4-way mirrored groups, so a multiple of 4 keeps the
+// cap actually reachable — at 10 the third group would never fit.
+export const MAX_OBSTACLES = 12;
 
 // ─── Per-food speed tuning ────────────────────────────────────────────────────
 // Each food eaten within a level reduces the tick interval by SPEED_PER_FOOD ms,
 // resetting to the new level's base speed on every level-up.
 // SPEED_FLOOR is a hard minimum to prevent the interval reaching unusable values.
 export const SPEED_PER_FOOD = 8;   // ms subtracted per food eaten within a level
-export const SPEED_FLOOR    = 40;  // minimum interval in ms (safety cap at INSANE)
+export const SPEED_FLOOR    = 40;  // minimum interval in ms (floor for the whole curve)
 
 // ─── Input constants ──────────────────────────────────────────────────────────
 // Minimum pixel travel for a touch to register as a directional swipe.

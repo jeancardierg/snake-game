@@ -6,8 +6,8 @@
  *   current  = score threshold where the next level begins (level.scoreNext)
  *   progress = (score - prev) / (current - prev)   clamped to [0, 1]
  *
- * On the final level (INSANE, scoreNext = Infinity), progress is always 1
- * and the "MAX LEVEL" label replaces the next-level hint.
+ * Levels are endless (see levels.js), so there is always a next level and the
+ * former "MAX LEVEL" state no longer exists.
  *
  * Accessibility: has role="progressbar" with aria-valuenow so screen readers
  * can announce the current level progress as a percentage.
@@ -16,18 +16,15 @@
  *   score       number  — current game score
  *   levelIndex  number  — current level index
  */
-import { LEVELS } from '../constants';
+import { getLevel } from '../levels';
 
 export function LevelBar({ score, levelIndex }) {
-  const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
-  const level = LEVELS[safeIdx];
-  const next  = LEVELS[safeIdx + 1];  // undefined on the final level
-  const prev  = safeIdx > 0 ? LEVELS[safeIdx - 1].scoreNext : 0;
+  const safeIdx = Math.max(levelIndex ?? 0, 0);
+  const level = getLevel(safeIdx);
+  const next  = getLevel(safeIdx + 1);
+  const prev  = safeIdx > 0 ? getLevel(safeIdx - 1).scoreNext : 0;
 
-  // On the final level next is undefined, so show a full bar (progress = 1)
-  const progress = next
-    ? Math.min(1, (score - prev) / (level.scoreNext - prev))
-    : 1;
+  const progress = Math.min(1, Math.max(0, (score - prev) / (level.scoreNext - prev)));
 
   return (
     <div className="level-bar-wrap">
@@ -50,17 +47,10 @@ export function LevelBar({ score, levelIndex }) {
         />
       </div>
 
-      {next ? (
-        // Show next level name and score threshold
-        <span className="level-bar-next" style={{ color: next.color }}>
-          → {next.label} at {level.scoreNext}
-        </span>
-      ) : (
-        // Player is on the final level
-        <span className="level-bar-next" style={{ color: level.color }}>
-          MAX LEVEL
-        </span>
-      )}
+      {/* Next level identifier and the score that unlocks it */}
+      <span className="level-bar-next" style={{ color: next.color }}>
+        → {next.id} at {level.scoreNext}
+      </span>
     </div>
   );
 }

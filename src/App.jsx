@@ -16,7 +16,7 @@
  * Touch controls: swipe on the canvas in any direction.
  * touchAction:'none' prevents the browser from scrolling while swiping.
  */
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { useSnake } from './hooks/useSnake';
 import { GameCanvas } from './components/GameCanvas';
 import { Scoreboard } from './components/Scoreboard';
@@ -24,16 +24,27 @@ import { LevelBar } from './components/LevelBar';
 import { Overlay } from './components/Overlay';
 import { DPad } from './components/DPad';
 import { DIR, SWIPE_THRESHOLD } from './constants';
+import { isMusicEnabled, setMusicEnabled } from './music';
 import './index.css';
 
 export default function App() {
   // All game state and actions come from a single hook
-  const { headIdxRef, snakeLenRef, foodRef, score, best, levelIndex, state, applyDir, pause, reset } = useSnake();
+  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, applyDir, pause, reset } = useSnake();
 
   // Ref mirror of state so GameCanvas's rAF loop can read it without a React
   // re-render. Updated synchronously after each render via useEffect.
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+
+  // ── Music toggle ────────────────────────────────────────────────────────────
+  // music.js owns the preference (and its localStorage persistence); this is
+  // just a mirror so the button label re-renders.
+  const [musicOn, setMusicOn] = useState(isMusicEnabled);
+  const toggleMusic = useCallback(() => {
+    const next = !isMusicEnabled();
+    setMusicEnabled(next);
+    setMusicOn(next);
+  }, []);
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
   // Track where each touch started. Using a ref so the handlers are stable
@@ -84,11 +95,19 @@ export default function App() {
         onTouchEnd={handleSwipeEnd}
         style={{ touchAction: 'none' }}
       >
-        <GameCanvas headIdxRef={headIdxRef} snakeLenRef={snakeLenRef} foodRef={foodRef} levelIndex={levelIndex} stateRef={stateRef} />
+        <GameCanvas
+          headIdxRef={headIdxRef}
+          snakeLenRef={snakeLenRef}
+          foodRef={foodRef}
+          obstaclesRef={obstaclesRef}
+          levelIndex={levelIndex}
+          stateRef={stateRef}
+        />
         <Overlay
           state={state}
           score={score}
           levelIndex={levelIndex}
+          banner={banner}
           onReset={reset}
           onPause={pause}
         />
@@ -104,6 +123,14 @@ export default function App() {
           {state === 'paused' ? '▶ Resume' : '⏸ Pause'}
         </button>
         <button className="ctrl-btn" onClick={reset}>↺ Reset</button>
+        <button
+          className="ctrl-btn"
+          onClick={toggleMusic}
+          aria-pressed={musicOn}
+          aria-label={musicOn ? 'Mute music' : 'Unmute music'}
+        >
+          {musicOn ? '🔊 Music' : '🔇 Music'}
+        </button>
       </div>
     </div>
   );

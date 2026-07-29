@@ -30,12 +30,10 @@ export default function App() {
   // All game state and actions come from a single hook
   const { headIdxRef, snakeLenRef, foodRef, score, best, levelIndex, state, applyDir, pause, reset } = useSnake();
 
-  // Ref mirrors of state/score so GameCanvas rAF loop can read them without
-  // React re-renders. Updated synchronously after each render via useEffect.
+  // Ref mirror of state so GameCanvas's rAF loop can read it without a React
+  // re-render. Updated synchronously after each render via useEffect.
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
-  const scoreRef = useRef(score);
-  useEffect(() => { scoreRef.current = score; }, [score]);
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
   // Track where each touch started. Using a ref so the handlers are stable
@@ -86,7 +84,7 @@ export default function App() {
         onTouchEnd={handleSwipeEnd}
         style={{ touchAction: 'none' }}
       >
-        <GameCanvas headIdxRef={headIdxRef} snakeLenRef={snakeLenRef} foodRef={foodRef} levelIndex={levelIndex} stateRef={stateRef} scoreRef={scoreRef} />
+        <GameCanvas headIdxRef={headIdxRef} snakeLenRef={snakeLenRef} foodRef={foodRef} levelIndex={levelIndex} stateRef={stateRef} />
         <Overlay
           state={state}
           score={score}

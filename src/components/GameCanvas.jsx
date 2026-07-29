@@ -127,7 +127,7 @@ function makeSnakeHeadTexture() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, stateRef, scoreRef }) { // eslint-disable-line no-unused-vars
+export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, stateRef }) {
   const canvasRef     = useRef(null);
   const color         = LEVELS[levelIndex]?.color ?? '#4ecca3';
   const levelIndexRef = useRef(levelIndex);

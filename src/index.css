@@ -183,6 +183,45 @@ body {
   outline-offset: 3px;
 }
 
+/* Level identifier — "LEVEL 07 · EMBERFALL". Color is set inline per level. */
+.overlay-level-id {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-align: center;
+  padding: 4px 14px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Level-up banner ──
+   Rendered over the live canvas, so it must never intercept input. */
+.overlay-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  animation: banner-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.overlay-banner-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 5px;
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+}
+.overlay-banner-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-align: center;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
+}
+
 /* ── Controls hint ── */
 .controls-hint {
   display: flex;
@@ -264,5 +303,9 @@ body {
 @keyframes title-pop {
   from { opacity: 0; transform: scale(0.55); }
   to   { opacity: 1; transform: scale(1); }
+}
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.9); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 

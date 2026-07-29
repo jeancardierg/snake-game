@@ -7,8 +7,13 @@
  * covered here — see useSnake.test.jsx for integration-level hook tests.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { COLS, ROWS, LEVELS, DIR } from '../constants';
+import { COLS, ROWS, SPEED_FLOOR, DIR } from '../constants';
+import { getLevel, scoreNextFor, speedForLevel } from '../levels';
 import { segPool, POOL_SIZE, initPool, poolGet, poolPrepend } from '../pool';
+
+// Levels are generated, not enumerated, so the curve assertions below sample a
+// range far beyond anything a player will reach rather than a fixed array.
+const SAMPLE = 50;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -17,32 +22,41 @@ describe('constants', () => {
     expect(COLS).toBe(10);
     expect(ROWS).toBe(10);
   });
+});
 
-  it('has exactly 5 levels', () => {
-    expect(LEVELS).toHaveLength(5);
-  });
-
-  it('levels are ordered from slowest to fastest (decreasing speed ms)', () => {
-    for (let i = 1; i < LEVELS.length; i++) {
-      expect(LEVELS[i].speed).toBeLessThan(LEVELS[i - 1].speed);
+describe('level curve', () => {
+  it('speed never increases from one level to the next', () => {
+    for (let i = 1; i <= SAMPLE; i++) {
+      expect(speedForLevel(i)).toBeLessThanOrEqual(speedForLevel(i - 1));
     }
   });
 
-  it('each level has a higher score threshold than the previous', () => {
-    for (let i = 1; i < LEVELS.length - 1; i++) {
-      expect(LEVELS[i].scoreNext).toBeGreaterThan(LEVELS[i - 1].scoreNext);
+  it('speed is clamped at SPEED_FLOOR and never goes below it', () => {
+    for (let i = 0; i <= SAMPLE; i++) {
+      expect(speedForLevel(i)).toBeGreaterThanOrEqual(SPEED_FLOOR);
+    }
+    // Far enough out the geometric decay is well past the floor
+    expect(speedForLevel(500)).toBe(SPEED_FLOOR);
+  });
+
+  it('each level has a strictly higher score threshold than the previous', () => {
+    for (let i = 1; i <= SAMPLE; i++) {
+      expect(scoreNextFor(i)).toBeGreaterThan(scoreNextFor(i - 1));
     }
   });
 
-  it('final level (INSANE) has Infinity scoreNext so the player never leaves it', () => {
-    expect(LEVELS[LEVELS.length - 1].scoreNext).toBe(Infinity);
+  it('thresholds are finite at every level — progression never ends', () => {
+    for (let i = 0; i <= SAMPLE; i++) {
+      expect(Number.isFinite(getLevel(i).scoreNext)).toBe(true);
+    }
   });
 
   it('every level has a non-empty color string', () => {
-    LEVELS.forEach(lvl => {
-      expect(typeof lvl.color).toBe('string');
-      expect(lvl.color.length).toBeGreaterThan(0);
-    });
+    for (let i = 0; i <= SAMPLE; i++) {
+      const { color } = getLevel(i);
+      expect(typeof color).toBe('string');
+      expect(color.length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -119,11 +133,12 @@ function isSelfCollision(head, snake, willEat = false) {
 
 /**
  * Determine which level index a given score maps to.
- * Mirrors the while-loop inside tick() that handles level-up.
+ * Mirrors the while-loop inside tick() that handles level-up. The loop is
+ * unbounded now — it terminates because scoreNextFor is strictly increasing.
  */
 function levelForScore(score) {
   let lvl = 0;
-  while (lvl < LEVELS.length - 1 && score >= LEVELS[lvl].scoreNext) lvl++;
+  while (score >= scoreNextFor(lvl)) lvl++;
   return lvl;
 }
 
@@ -315,26 +330,25 @@ describe('levelForScore', () => {
   });
 
   it('score just below first threshold stays at level 0', () => {
-    expect(levelForScore(LEVELS[0].scoreNext - 10)).toBe(0);
+    expect(levelForScore(scoreNextFor(0) - 10)).toBe(0);
   });
 
   it('score at first threshold advances to level 1', () => {
-    expect(levelForScore(LEVELS[0].scoreNext)).toBe(1);
+    expect(levelForScore(scoreNextFor(0))).toBe(1);
   });
 
   it('score at second threshold advances to level 2', () => {
-    expect(levelForScore(LEVELS[1].scoreNext)).toBe(2);
+    expect(levelForScore(scoreNextFor(1))).toBe(2);
   });
 
-  it('very high score stays capped at max level', () => {
-    expect(levelForScore(999999)).toBe(LEVELS.length - 1);
+  it('a very high score keeps advancing — there is no max level', () => {
+    expect(levelForScore(999999)).toBeGreaterThan(SAMPLE);
   });
 
   it('score at each threshold maps to the correct level', () => {
-    LEVELS.forEach((lvl, i) => {
-      if (lvl.scoreNext === Infinity) return; // last level, skip
+    for (let i = 0; i <= SAMPLE; i++) {
       // Exactly at the threshold: should be at the *next* level
-      expect(levelForScore(lvl.scoreNext)).toBe(i + 1);
-    });
+      expect(levelForScore(scoreNextFor(i))).toBe(i + 1);
+    }
   });
 });

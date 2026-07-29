@@ -10,7 +10,17 @@
 
 let ctx = null;
 
-function getCtx() {
+/**
+ * Shared AudioContext accessor.
+ *
+ * Exported so music.js can reuse the same context — browsers cap the number of
+ * live AudioContexts, and two contexts cannot be mixed through one destination.
+ *
+ * Returns null when Web Audio is unavailable (jsdom under test, older browsers),
+ * which turns every sound and the whole music sequencer into a silent no-op.
+ */
+export function getCtx() {
+  if (typeof window === 'undefined') return null;
   const Ctor = window.AudioContext || window.webkitAudioContext;
   if (!Ctor) return null;
   if (!ctx) ctx = new Ctor();

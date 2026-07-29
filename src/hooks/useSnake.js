@@ -6,13 +6,15 @@
  * No component is allowed to mutate game state directly.
  *
  * Returns:
- *   headIdxRef  React.MutableRefObject<number>  — pool head index (for GameCanvas)
- *   snakeLenRef React.MutableRefObject<number>  — live segment count (for GameCanvas)
- *   foodRef     React.MutableRefObject<{x,y}>   — current food position (for GameCanvas)
+ *   headIdxRef   React.MutableRefObject<number>  — pool head index (for GameCanvas)
+ *   snakeLenRef  React.MutableRefObject<number>  — live segment count (for GameCanvas)
+ *   foodRef      React.MutableRefObject<{x,y}>   — current food position (for GameCanvas)
+ *   obstaclesRef React.MutableRefObject<{set,cells}> — current level's walls (for GameCanvas)
  *   score       number    — current score
  *   best        number    — all-time best (persisted in localStorage)
- *   levelIndex  number    — current level index into LEVELS (0–4)
+ *   levelIndex  number    — current level index (unbounded; see levels.js)
  *   state       string    — 'idle' | 'running' | 'paused' | 'dead'
+ *   banner      object    — transient level-up announcement, or null
  *   applyDir    function  — queue a new direction ({x,y})
  *   pause       function  — toggle pause/resume
  *   reset       function  — restart the game from scratch
@@ -25,11 +27,15 @@
  *   non-canvas UI (Scoreboard, LevelBar, Overlay, buttons).
  */
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { COLS, ROWS, LEVELS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
+import { COLS, ROWS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
+import { getLevel } from '../levels';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 import { playStart, playEat, playLevelUp, playDeath } from '../audio';
+import { startMusic, stopMusic, pauseMusic, resumeMusic } from '../music';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
+// NOTE: levels.js reserves SPAWN_ROW / SPAWN_RUNWAY_X from obstacle placement
+// based on these values — keep the two in sync.
 const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
 const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 
@@ -64,7 +70,25 @@ function readBestScore() {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Pick a random free grid cell not occupied by the snake.
+ * Read an optional `?level=N` override from the URL.
+ *
+ * Development/QA aid: jumping straight to a level is the only practical way to
+ * eyeball a late-game theme, layout or track. Parsed defensively — anything
+ * that is not a finite non-negative integer is ignored.
+ */
+function readStartLevel() {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('level');
+    if (raw === null) return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Pick a random free grid cell not occupied by the snake or an obstacle.
  *
  * O(n) implementation: build a Set of occupied cells once, then sample
  * from the list of free cells directly. Avoids the O(n²) retry loop that
@@ -73,9 +97,9 @@ function readBestScore() {
  * Returns null only when every cell is occupied (board full = game won).
  * Caller is responsible for handling null without moving the food.
  */
-function randomFood(headIdx, snakeLen) {
+function randomFood(headIdx, snakeLen, obstacles) {
   // Build occupied set in one pass
-  const occupied = new Set();
+  const occupied = new Set(obstacles);
   for (let i = 0; i < snakeLen; i++) {
     const s = segPool[(headIdx + i) % POOL_SIZE];
     occupied.add(s.x * ROWS + s.y);
@@ -94,6 +118,58 @@ function randomFood(headIdx, snakeLen) {
   return { ...cell };
 }
 
+// Starting level. Constant for the lifetime of the page (the URL cannot change
+// without a reload), so it is read once here rather than per hook instance.
+const START_LEVEL = readStartLevel();
+
+// How long the level-up announcement stays on screen.
+const BANNER_MS = 1600;
+
+/** Build the {set, cells} obstacle record for a level, minus any excluded cells. */
+export function buildObstacles(lvl, excluded) {
+  const set   = new Set();
+  const cells = [];
+  for (const c of getLevel(lvl).obstacles) {
+    const key = c.x * ROWS + c.y;
+    if (excluded?.has(key)) continue;
+    set.add(key);
+    cells.push(c);
+  }
+  return { set, cells };
+}
+
+/** How many cells ahead of the head are kept clear of a mid-run wall drop. */
+export const LOOKAHEAD = 2;
+
+/**
+ * Cells a new level's obstacles must not be dropped onto, given a board that is
+ * already in play:
+ *   - every cell the snake occupies (it would end up inside a wall)
+ *   - the cell holding the current food (it would become unreachable)
+ *   - the LOOKAHEAD cells directly ahead of the head (an unavoidable death)
+ *
+ * Off-board look-ahead cells produce keys no obstacle can match, so no bounds
+ * check is needed. Exported for tests — the fairness of a mid-run layout swap
+ * rests entirely on this set.
+ */
+export function spawnExclusions(headIdx, snakeLen, dir, food) {
+  const excluded = new Set();
+
+  for (let i = 0; i < snakeLen; i++) {
+    const s = segPool[(headIdx + i) % POOL_SIZE];
+    excluded.add(s.x * ROWS + s.y);
+  }
+
+  const head = poolGet(headIdx, 0);
+  for (let k = 1; k <= LOOKAHEAD; k++) {
+    excluded.add((head.x + dir.x * k) * ROWS + (head.y + dir.y * k));
+  }
+
+  if (food) excluded.add(food.x * ROWS + food.y);
+
+  return excluded;
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useSnake() {
 
@@ -101,8 +177,13 @@ export function useSnake() {
   // snake and food are intentionally NOT state — GameCanvas reads refs directly.
   const [score, setScore]       = useState(0);
   const [best, setBest]         = useState(readBestScore);
-  const [levelIndex, setLevel]  = useState(0);
+  const [levelIndex, setLevel]  = useState(START_LEVEL);
   const [state, setState]       = useState('idle');
+  // Transient level-up announcement. Owned here rather than derived in App from
+  // a levelIndex change, because only this hook knows when an advance actually
+  // happened — a reset back to the same index must not re-announce it.
+  const [banner, setBanner]     = useState(null);
+  const bannerTimerRef          = useRef(null);
 
   // ── Refs (readable inside setInterval without stale-closure issues) ──────────
   const dirRef      = useRef(INIT_DIR);
@@ -112,14 +193,22 @@ export function useSnake() {
   const headIdxRef  = useRef(0);                // index of head segment in segPool
   const snakeLenRef = useRef(INIT_SNAKE.length);// live segment count
 
+  // (7,5) sits on the reserved spawn row, so it can never collide with an obstacle.
   const foodRef     = useRef({ x: 7, y: 5 });
   const scoreRef    = useRef(0);
   const bestRef     = useRef(best);
-  const levelRef    = useRef(0);
+  const levelRef    = useRef(START_LEVEL);
   const intervalRef       = useRef(null);
   const stateRef          = useRef('idle');
-  const foodsThisLevelRef = useRef(0);                // foods eaten since last level-up / reset
-  const speedRef          = useRef(LEVELS[0].speed);  // live interval delay in ms
+  const foodsThisLevelRef = useRef(0);                            // foods eaten since last level-up / reset
+  const speedRef          = useRef(getLevel(START_LEVEL).speed);  // live interval delay in ms
+
+  // Current level's obstacle layout: a Set of x*ROWS+y keys for O(1) collision
+  // checks, plus the matching cell list for GameCanvas to render.
+  // useRef has no lazy initialiser, so seed it on the first render instead —
+  // this must be populated before the first tick, and reset() is not called on mount.
+  const obstaclesRef = useRef(null);
+  if (obstaclesRef.current === null) obstaclesRef.current = buildObstacles(START_LEVEL);
 
   // tickRef holds a reference to the latest tick callback.
   // startLoop's setInterval calls tickRef.current() instead of tick() directly.
@@ -136,10 +225,35 @@ export function useSnake() {
 
   const startLoop = useCallback((lvlIdx, speed) => {
     stopLoop();
-    const ms = speed ?? LEVELS[lvlIdx ?? levelRef.current].speed;
+    const ms = speed ?? getLevel(lvlIdx ?? levelRef.current).speed;
     speedRef.current    = ms;
     intervalRef.current = setInterval(() => tickRef.current?.(), ms);
   }, [stopLoop]);
+
+  /** Install a level's obstacle layout, honouring the mid-run spawn exclusions. */
+  const applyLevelObstacles = useCallback((lvl) => {
+    obstaclesRef.current = buildObstacles(lvl, spawnExclusions(
+      headIdxRef.current, snakeLenRef.current, dirRef.current, foodRef.current,
+    ));
+  }, []);
+
+  /** Show the level-up banner for BANNER_MS, replacing any banner already up. */
+  const announceLevel = useCallback((lvl) => {
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    setBanner(getLevel(lvl));
+    bannerTimerRef.current = setTimeout(() => {
+      bannerTimerRef.current = null;
+      setBanner(null);
+    }, BANNER_MS);
+  }, []);
+
+  const clearBanner = useCallback(() => {
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+    setBanner(null);
+  }, []);
 
   // ── State machine actions ─────────────────────────────────────────────────────
   // die() is declared before tick() so tick() can call it without a forward reference.
@@ -148,8 +262,10 @@ export function useSnake() {
     stopLoop();
     stateRef.current = 'dead';
     setState('dead');
+    stopMusic();
+    clearBanner();
     playDeath();
-  }, [stopLoop]);
+  }, [stopLoop, clearBanner]);
 
   // ── Core tick ─────────────────────────────────────────────────────────────────
 
@@ -186,7 +302,12 @@ export function useSnake() {
       return die();
     }
 
-    // 3b. Self collision — check body segments before prepend.
+    // 3b. Obstacle collision — the level's generated layout is fatal like a wall
+    if (obstaclesRef.current.set.has(hx * ROWS + hy)) {
+      return die();
+    }
+
+    // 3c. Self collision — check body segments before prepend.
     // Skip index 0 (the current head — the moved head can never equal it) and,
     // when the snake is NOT eating, skip the tail: it vacates its cell on this
     // same tick, so moving the head into the old tail cell is legal (canonical
@@ -227,16 +348,23 @@ export function useSnake() {
       foodsThisLevelRef.current += 1;
       const boostedSpeed = Math.max(
         SPEED_FLOOR,
-        LEVELS[levelRef.current].speed - foodsThisLevelRef.current * SPEED_PER_FOOD
+        getLevel(levelRef.current).speed - foodsThisLevelRef.current * SPEED_PER_FOOD
       );
 
-      // Level-up: while loop handles jumping past multiple thresholds at once
+      // Level-up: while loop handles jumping past multiple thresholds at once.
+      // There is no final level — scoreNext is strictly increasing, so the loop
+      // always terminates once the score falls below the next threshold.
       let lvl = levelRef.current;
-      while (lvl < LEVELS.length - 1 && newScore >= LEVELS[lvl].scoreNext) lvl++;
+      while (newScore >= getLevel(lvl).scoreNext) lvl++;
       if (lvl !== levelRef.current) {
         levelRef.current = lvl;
+        // Obstacles must be installed before the new food is placed below,
+        // otherwise food can spawn inside a freshly added wall.
+        applyLevelObstacles(lvl);
         setLevel(lvl);
+        announceLevel(lvl);
         playLevelUp();
+        startMusic(getLevel(lvl).music);
         foodsThisLevelRef.current = 0;  // reset per-food counter on level-up
         startLoop(lvl);                 // restarts at new level's base speed
       } else {
@@ -247,7 +375,7 @@ export function useSnake() {
       // randomFood returns null only when every cell is occupied (board full).
       // In that case food stays where it is; the snake can't reach it without
       // self-collision, so no re-scoring is possible.
-      const newFood = randomFood(headIdxRef.current, snakeLenRef.current);
+      const newFood = randomFood(headIdxRef.current, snakeLenRef.current, obstaclesRef.current.set);
       if (newFood) {
         foodRef.current = newFood;
       }
@@ -265,11 +393,12 @@ export function useSnake() {
   // Score/level state is consumed solely by non-canvas UI (Scoreboard, LevelBar)
   // which renders on the next React flush. No mismatch window exists in practice.
   //
-  // tick() closes over startLoop (stable useCallback) and reads all other values
-  // via refs — refs are always current so no stale closure risk.
+  // tick() closes over startLoop and applyLevelObstacles (both stable
+  // useCallbacks) and reads all other values via refs — refs are always current
+  // so no stale closure risk.
   // exhaustive-deps would demand listing every ref object, causing tick() to be
   // recreated unnecessarily on every render. Suppressed intentionally.
-  }, [startLoop]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [startLoop, applyLevelObstacles, announceLevel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep tickRef pointing to the latest tick after every render.
   // useLayoutEffect runs synchronously after DOM mutations, before paint,
@@ -283,6 +412,9 @@ export function useSnake() {
       stateRef.current = 'running';
       setState('running');
       playStart();
+      // This call is inside a real user gesture, which is what unblocks the
+      // AudioContext under browser autoplay policy — music must start here.
+      startMusic(getLevel(levelRef.current).music);
       startLoop(levelRef.current);
     }
 
@@ -306,31 +438,39 @@ export function useSnake() {
       stopLoop();
       stateRef.current = 'paused';
       setState('paused');
+      pauseMusic();
     } else if (stateRef.current === 'paused') {
       stateRef.current = 'running';
       setState('running');
+      resumeMusic();
       startLoop(undefined, speedRef.current);  // restore earned speed, not just base
     }
   }, [startLoop, stopLoop]);
 
   const reset = useCallback(() => {
     stopLoop();
+    stopMusic();
+    clearBanner();
     headIdxRef.current  = initPool(INIT_SNAKE);   // returns 0; fills pool
     snakeLenRef.current = INIT_SNAKE.length;
     dirRef.current      = { x: 1, y: 0 };
     dirQueueRef.current = [];
-    // A 3-segment snake on a 10×10 grid leaves 97 free cells, so randomFood is
-    // never null here (it returns null only when the whole board is occupied).
-    foodRef.current = randomFood(headIdxRef.current, snakeLenRef.current);
+    // Fresh board: take the level's layout as generated (it already reserves the
+    // spawn row), then place food clear of both the snake and the obstacles.
+    obstaclesRef.current = buildObstacles(START_LEVEL);
+    // A 3-segment snake on a 10×10 grid with at most MAX_OBSTACLES walls leaves
+    // plenty of free cells, so randomFood is never null here (it returns null
+    // only when the whole board is occupied).
+    foodRef.current = randomFood(headIdxRef.current, snakeLenRef.current, obstaclesRef.current.set);
     scoreRef.current          = 0;
-    levelRef.current          = 0;
+    levelRef.current          = START_LEVEL;
     stateRef.current          = 'idle';
     foodsThisLevelRef.current = 0;
-    speedRef.current          = LEVELS[0].speed;
+    speedRef.current          = getLevel(START_LEVEL).speed;
     setScore(0);
-    setLevel(0);
+    setLevel(START_LEVEL);
     setState('idle');
-  }, [stopLoop]);
+  }, [stopLoop, clearBanner]);
 
   // ── Side effects ──────────────────────────────────────────────────────────────
 
@@ -369,6 +509,7 @@ export function useSnake() {
           stopLoop();
           stateRef.current = 'paused';
           setState('paused');
+          pauseMusic();
           autoPaused = true;
         }
       } else {
@@ -376,6 +517,7 @@ export function useSnake() {
           autoPaused = false;
           stateRef.current = 'running';
           setState('running');
+          resumeMusic();
           startLoop(undefined, speedRef.current);  // restore earned speed on tab restore
         }
       }
@@ -385,15 +527,19 @@ export function useSnake() {
   }, [stopLoop, startLoop]);
 
   useEffect(() => {
-    return () => stopLoop();
+    return () => {
+      stopLoop();
+      stopMusic();   // the scheduler interval outlives the component otherwise
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    };
   }, [stopLoop]);
 
   // ── Public API ────────────────────────────────────────────────────────────────
   return {
     // Refs for GameCanvas (read directly, no React round-trip)
-    headIdxRef, snakeLenRef, foodRef,
+    headIdxRef, snakeLenRef, foodRef, obstaclesRef,
     // React state for non-canvas UI
-    score, best, levelIndex, state,
+    score, best, levelIndex, state, banner,
     // Actions
     applyDir, pause, reset,
   };

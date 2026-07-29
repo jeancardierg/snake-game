@@ -9,15 +9,21 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSnake } from '../hooks/useSnake';
-import { LEVELS, DIR } from '../constants';
-import { segPool, POOL_SIZE } from '../pool';
+import { useSnake, buildObstacles, spawnExclusions, LOOKAHEAD } from '../hooks/useSnake';
+import { COLS, ROWS, DIR } from '../constants';
+import { getLevel } from '../levels';
+import { segPool, POOL_SIZE, initPool } from '../pool';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Advance fake timers by one tick at the given level speed. */
+/**
+ * Advance fake timers by one tick at the given level's *base* speed.
+ *
+ * The per-food speed boost only shortens the interval, so advancing by the base
+ * speed always covers at least one tick.
+ */
 function tick(levelIdx = 0) {
-  act(() => { vi.advanceTimersByTime(LEVELS[levelIdx].speed); });
+  act(() => { vi.advanceTimersByTime(getLevel(levelIdx).speed); });
 }
 
 /**
@@ -31,11 +37,17 @@ function placeFoodAhead(result) {
   });
 }
 
+// The pool is module-level state shared by every hook instance, and useSnake
+// does not re-seed it on mount (only reset() does). Any test that calls
+// initPool directly would otherwise leak its snake into the tests that follow.
+const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
+
 // ─── Setup / teardown ─────────────────────────────────────────────────────────
 
 beforeEach(() => {
   vi.useFakeTimers();
   localStorage.clear();
+  initPool(INIT_SNAKE);
 });
 
 afterEach(() => {
@@ -115,14 +127,14 @@ describe('state machine', () => {
     const { result } = renderHook(() => useSnake());
     // Move up; snake starts at y=5, wall is y<0, so 6 ticks hits it
     act(() => result.current.applyDir(DIR.UP));
-    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 8); });
+    act(() => { vi.advanceTimersByTime(getLevel(0).speed * 8); });
     expect(result.current.state).toBe('dead');
   });
 
   it('reset returns to idle with score 0 and level 0', () => {
     const { result } = renderHook(() => useSnake());
     act(() => result.current.applyDir(DIR.UP));
-    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 8); });
+    act(() => { vi.advanceTimersByTime(getLevel(0).speed * 8); });
     act(() => result.current.reset());
     expect(result.current.state).toBe('idle');
     expect(result.current.score).toBe(0);
@@ -132,7 +144,7 @@ describe('state machine', () => {
   it('applyDir is ignored when state is dead', () => {
     const { result } = renderHook(() => useSnake());
     act(() => result.current.applyDir(DIR.UP));
-    act(() => { vi.advanceTimersByTime(LEVELS[0].speed * 8); });
+    act(() => { vi.advanceTimersByTime(getLevel(0).speed * 8); });
     expect(result.current.state).toBe('dead');
     act(() => result.current.applyDir(DIR.RIGHT));
     expect(result.current.state).toBe('dead');
@@ -201,15 +213,184 @@ describe('score and level', () => {
     expect(result.current.best).toBe(80);
   });
 
-  it('advances to level 1 when score reaches LEVELS[0].scoreNext', () => {
+  it('advances to level 1 when score reaches the level 0 threshold', () => {
     const { result } = renderHook(() => useSnake());
     act(() => result.current.applyDir(DIR.UP));
-    const needed = LEVELS[0].scoreNext / 10;
+    const needed = getLevel(0).scoreNext / 10;
     for (let i = 0; i < needed; i++) {
       placeFoodAhead(result);
       tick(result.current.levelIndex);
     }
     expect(result.current.levelIndex).toBe(1);
+  });
+
+  it('announces the new level with a banner, and not before', () => {
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.banner).toBeNull();
+
+    act(() => result.current.applyDir(DIR.UP));
+    const needed = getLevel(0).scoreNext / 10;
+    for (let i = 0; i < needed; i++) {
+      placeFoodAhead(result);
+      tick(result.current.levelIndex);
+    }
+    expect(result.current.banner).toEqual(getLevel(1));
+
+    // The banner is transient — it clears itself without another level-up
+    act(() => { vi.advanceTimersByTime(2000); });
+    expect(result.current.banner).toBeNull();
+  });
+
+  it('installs a consistent obstacle record on level-up', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));
+    const needed = getLevel(0).scoreNext / 10;
+    for (let i = 0; i < needed; i++) {
+      placeFoodAhead(result);
+      tick(result.current.levelIndex);
+    }
+
+    const { set, cells } = result.current.obstaclesRef.current;
+    expect(set.size).toBe(cells.length);
+    for (const c of cells) expect(set.has(c.x * ROWS + c.y)).toBe(true);
+  });
+});
+
+// ─── Mid-run layout swap ──────────────────────────────────────────────────────
+// Levelling up drops a new wall layout onto a board that is already in play.
+// These cover the exclusions that keep that swap survivable; the level-up path
+// itself cannot reach a level with walls in a unit test (that needs ~39 foods
+// eaten on a 10×10 board), so the rule is exercised directly.
+
+describe('spawnExclusions', () => {
+  const DUMMY_FOOD = { x: 9, y: 9 };
+
+  it('excludes every cell the snake occupies', () => {
+    const ex = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD);
+    for (const { x, y } of INIT_SNAKE) {
+      expect(ex.has(x * ROWS + y)).toBe(true);
+    }
+  });
+
+  it('excludes the cells directly ahead of the head', () => {
+    const ex = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD);
+    for (let k = 1; k <= LOOKAHEAD; k++) {
+      expect(ex.has((5 + k) * ROWS + 5)).toBe(true);
+    }
+  });
+
+  it('follows the head direction, not a fixed axis', () => {
+    const ex = spawnExclusions(0, 3, DIR.UP, DUMMY_FOOD);
+    expect(ex.has(5 * ROWS + 4)).toBe(true);   // one cell up
+    expect(ex.has(5 * ROWS + 3)).toBe(true);   // two cells up
+    expect(ex.has(6 * ROWS + 5)).toBe(false);  // not the old rightward path
+  });
+
+  it('excludes the current food cell', () => {
+    const ex = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD);
+    expect(ex.has(DUMMY_FOOD.x * ROWS + DUMMY_FOOD.y)).toBe(true);
+  });
+
+  it('tolerates a null food and an off-board look-ahead', () => {
+    initPool([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }]);
+    expect(() => spawnExclusions(0, 3, DIR.LEFT, null)).not.toThrow();
+  });
+});
+
+describe('buildObstacles', () => {
+  it('drops every excluded cell from the layout', () => {
+    // Find a level that actually generates walls, then exclude them all
+    let lvl = 0;
+    while (getLevel(lvl).obstacles.length === 0 && lvl < 60) lvl++;
+    const layout = getLevel(lvl).obstacles;
+    expect(layout.length).toBeGreaterThan(0);
+
+    const excluded = new Set(layout.map(c => c.x * ROWS + c.y));
+    const built = buildObstacles(lvl, excluded);
+    expect(built.cells).toEqual([]);
+    expect(built.set.size).toBe(0);
+  });
+
+  it('keeps the layout intact when nothing is excluded', () => {
+    let lvl = 0;
+    while (getLevel(lvl).obstacles.length === 0 && lvl < 60) lvl++;
+    const built = buildObstacles(lvl, new Set());
+    expect(built.cells).toEqual(getLevel(lvl).obstacles);
+    expect(built.set.size).toBe(built.cells.length);
+  });
+
+  it('drops only the excluded cells, not their neighbours', () => {
+    let lvl = 0;
+    while (getLevel(lvl).obstacles.length < 2 && lvl < 60) lvl++;
+    const layout = getLevel(lvl).obstacles;
+    const victim = layout[0];
+    const built = buildObstacles(lvl, new Set([victim.x * ROWS + victim.y]));
+    expect(built.cells.length).toBe(layout.length - 1);
+    expect(built.set.has(victim.x * ROWS + victim.y)).toBe(false);
+  });
+});
+
+// ─── Obstacles ────────────────────────────────────────────────────────────────
+
+describe('obstacles', () => {
+  it('kills the snake when the head runs into one', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));   // head at (5,5), moving up
+    act(() => {
+      // Wall off the cell directly ahead
+      result.current.obstaclesRef.current = {
+        set: new Set([5 * ROWS + 4]),
+        cells: [{ x: 5, y: 4 }],
+      };
+    });
+    tick(0);
+    expect(result.current.state).toBe('dead');
+  });
+
+  it('does not kill the snake on a cell that has no obstacle', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));
+    act(() => {
+      result.current.obstaclesRef.current = {
+        set: new Set([0 * ROWS + 0]),
+        cells: [{ x: 0, y: 0 }],
+      };
+    });
+    tick(0);
+    expect(result.current.state).toBe('running');
+  });
+
+  it('never spawns food on an obstacle cell', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));
+
+    // Block most of the board so a naive spawn would almost certainly land on
+    // an obstacle, leaving only the top-left column and the snake's own column.
+    const blocked = [];
+    for (let x = 2; x < COLS; x++) {
+      for (let y = 0; y < ROWS; y++) {
+        if (x === 5) continue;             // keep the snake's column clear
+        blocked.push({ x, y });
+      }
+    }
+    act(() => {
+      result.current.obstaclesRef.current = {
+        set: new Set(blocked.map(c => c.x * ROWS + c.y)),
+        cells: blocked,
+      };
+    });
+
+    placeFoodAhead(result);
+    tick(0);
+    expect(result.current.score).toBe(10);
+
+    const food = result.current.foodRef.current;
+    expect(result.current.obstaclesRef.current.set.has(food.x * ROWS + food.y)).toBe(false);
+  });
+
+  it('starts with an empty layout on level 0', () => {
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.obstaclesRef.current.cells).toEqual([]);
   });
 });
 

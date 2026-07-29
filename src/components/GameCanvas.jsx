@@ -22,7 +22,8 @@
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { COLS, ROWS, CELL, LEVELS } from '../constants';
+import { COLS, ROWS, CELL, MAX_OBSTACLES } from '../constants';
+import { getLevel } from '../levels';
 import { segPool, POOL_SIZE } from '../pool';
 
 const SIZE = COLS * CELL;   // 200 logical units
@@ -127,11 +128,14 @@ function makeSnakeHeadTexture() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, stateRef }) {
-  const canvasRef     = useRef(null);
-  const color         = LEVELS[levelIndex]?.color ?? '#4ecca3';
-  const levelIndexRef = useRef(levelIndex);
-  useEffect(() => { levelIndexRef.current = levelIndex; }, [levelIndex]);
+export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, levelIndex, stateRef }) {
+  const canvasRef = useRef(null);
+  const color     = getLevel(Math.max(levelIndex ?? 0, 0)).color;
+
+  // Handles onto the mutable parts of the scene, populated by the mount effect.
+  // The theme effect below recolors these in place rather than rebuilding the
+  // scene — teardown/rebuild would re-run the full disposal path every level.
+  const sceneRef = useRef(null);
 
   const animRef = useRef({
     prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1,
@@ -191,6 +195,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     scene.add(ground);
 
     // ── Grid lines ────────────────────────────────────────────────────────────
+    const gridMat = new THREE.LineBasicMaterial({ color: 0x2c5518, opacity: 0.25, transparent: true });
     {
       const verts = [];
       for (let i = 0; i <= COLS; i++) {
@@ -203,11 +208,25 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-      scene.add(new THREE.LineSegments(
-        geo,
-        new THREE.LineBasicMaterial({ color: 0x2c5518, opacity: 0.25, transparent: true }),
-      ));
+      scene.add(new THREE.LineSegments(geo, gridMat));
     }
+
+    // ── Obstacle blocks ───────────────────────────────────────────────────────
+    // One InstancedMesh with fixed capacity; the visible count is set per level.
+    // Instances are static within a level, so matrices are written only when the
+    // layout changes — never in the rAF loop.
+    const OB_H = CELL * 0.7;   // block height
+    const obstacleMat  = new THREE.MeshLambertMaterial({ color: 0x6b4a2a });
+    const obstacleMesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(CELL * 0.9, OB_H, CELL * 0.9),
+      obstacleMat,
+      MAX_OBSTACLES,
+    );
+    obstacleMesh.castShadow    = true;
+    obstacleMesh.receiveShadow = true;
+    obstacleMesh.count         = 0;
+    obstacleMesh.frustumCulled = false;
+    scene.add(obstacleMesh);
 
     // ── Snake dimensions / materials ──────────────────────────────────────────
     const BODY_R   = CELL * 0.34;   // max tube radius (neck)
@@ -425,6 +444,13 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       bodyGeom.setDrawRange(0, (N - 1) * RAD * 6);
     };
 
+    // Publish the recolorable handles for the theme effect below. Set before the
+    // first frame so a level applied on mount (via ?level=N) is never missed.
+    sceneRef.current = {
+      scene, groundMat, gridMat, ambient, sun, fill,
+      mineMat, obstacleMat, obstacleMesh, obstacleHeight: OB_H,
+    };
+
     // ── rAF loop ──────────────────────────────────────────────────────────────
     let stopped = false;
     let rafId;
@@ -610,8 +636,41 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
       });
       renderer.dispose();
       renderer.forceContextLoss();
+      sceneRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Per-level theme + obstacle layout ───────────────────────────────────────
+  // Runs on mount (after the effect above, which is declared first) and on every
+  // level change. Mutates materials and lights in place; the scene graph itself
+  // is never rebuilt.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+
+    const { theme } = getLevel(Math.max(levelIndex ?? 0, 0));
+    s.scene.background.set(theme.bg);
+    s.groundMat.color.set(theme.ground);
+    s.gridMat.color.set(theme.grid);
+    s.ambient.color.set(theme.ambient);
+    s.sun.color.set(theme.sun);
+    s.fill.color.set(theme.fill);
+    s.mineMat.color.set(theme.food);
+    s.obstacleMat.color.set(theme.obstacle);
+
+    // Obstacles come from the engine's ref, not from getLevel(): useSnake drops
+    // any generated cell that would land on the snake, the food, or directly
+    // ahead of the head, so the two can legitimately differ mid-run.
+    const cells = obstaclesRef?.current?.cells ?? [];
+    const m = new THREE.Matrix4();
+    const n = Math.min(cells.length, s.obstacleMesh.instanceMatrix.count);
+    for (let i = 0; i < n; i++) {
+      m.setPosition(worldX(cells[i].x), s.obstacleHeight / 2, worldZ(cells[i].y));
+      s.obstacleMesh.setMatrixAt(i, m);
+    }
+    s.obstacleMesh.count = n;
+    s.obstacleMesh.instanceMatrix.needsUpdate = true;
+  }, [levelIndex, obstaclesRef]);
 
   return (
     <canvas

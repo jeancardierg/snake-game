@@ -103,11 +103,18 @@ function isWallCollision(head) {
 }
 
 /**
- * Returns true if the head occupies any segment of the snake body.
- * Mirrors the self-collision check in tick().
+ * Returns true if moving the head into `head` collides with the snake body.
+ * Mirrors the self-collision check in tick(): index 0 (the current head) is
+ * skipped, and when the snake is NOT eating the tail is skipped too — it vacates
+ * its cell on this tick, so moving into the old tail cell is legal in canonical
+ * Snake. When eating (willEat=true) the tail stays, so the full body is checked.
  */
-function isSelfCollision(head, snake) {
-  return snake.some(s => s.x === head.x && s.y === head.y);
+function isSelfCollision(head, snake, willEat = false) {
+  const checkLen = willEat ? snake.length : snake.length - 1;
+  for (let i = 1; i < checkLen; i++) {
+    if (snake[i].x === head.x && snake[i].y === head.y) return true;
+  }
+  return false;
 }
 
 /**
@@ -201,11 +208,19 @@ describe('isWallCollision', () => {
 // ── Self collision ────────────────────────────────────────────────────────────
 
 describe('isSelfCollision', () => {
-  const snake = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
+  const snake = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }]; // head, body, tail
 
-  it('detects collision when head lands on a body segment', () => {
+  it('detects collision when head lands on a non-tail body segment', () => {
     expect(isSelfCollision({ x: 4, y: 5 }, snake)).toBe(true);
-    expect(isSelfCollision({ x: 3, y: 5 }, snake)).toBe(true);
+  });
+
+  it('allows moving into the tail cell when not eating (tail vacates this tick)', () => {
+    // Canonical Snake: on a non-eating tick the tail moves away, freeing its cell.
+    expect(isSelfCollision({ x: 3, y: 5 }, snake, false)).toBe(false);
+  });
+
+  it('treats the tail cell as a collision when eating (tail does not move)', () => {
+    expect(isSelfCollision({ x: 3, y: 5 }, snake, true)).toBe(true);
   });
 
   it('no collision when head is on an empty cell', () => {

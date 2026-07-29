@@ -45,7 +45,12 @@ initPool(INIT_SNAKE);
  */
 function readBestScore() {
   try {
-    return parseInt(localStorage.getItem('snakeBest') || '0', 10);
+    // Validate the parsed value. A corrupt/non-numeric stored value must not
+    // poison `best` with NaN: it would render as "NaN" and, because
+    // `newScore > NaN` is always false, permanently block best-score updates
+    // for the session. Reject anything that isn't a finite, non-negative number.
+    const n = parseInt(localStorage.getItem('snakeBest'), 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   } catch (e) {
     console.warn('[useSnake] localStorage unavailable:', e.message);
     return 0;
@@ -181,9 +186,15 @@ export function useSnake() {
       return die();
     }
 
-    // 3b. Self collision — check all current segments before prepend
+    // 3b. Self collision — check body segments before prepend.
+    // Skip index 0 (the current head — the moved head can never equal it) and,
+    // when the snake is NOT eating, skip the tail: it vacates its cell on this
+    // same tick, so moving the head into the old tail cell is legal (canonical
+    // Snake). When eating, the tail stays put, so the full body is checked.
     const snakeLen = snakeLenRef.current;
-    for (let i = 0; i < snakeLen; i++) {
+    const willEat  = hx === foodRef.current.x && hy === foodRef.current.y;
+    const checkLen = willEat ? snakeLen : snakeLen - 1;
+    for (let i = 1; i < checkLen; i++) {
       const s = segPool[(headIdxRef.current + i) % POOL_SIZE];
       if (s.x === hx && s.y === hy) return die();
     }
@@ -197,7 +208,7 @@ export function useSnake() {
       console.error('[useSnake] snake length exceeded POOL_SIZE — ring buffer overflow imminent');
     }
 
-    const ate = hx === foodRef.current.x && hy === foodRef.current.y;
+    const ate = willEat;  // computed above for the self-collision check; food hasn't moved since
 
     if (ate) {
       playEat();
@@ -337,12 +348,16 @@ export function useSnake() {
   // ── Side effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const keyMap = {
+    // Prototype-free map so a key such as "__proto__" / "constructor" /
+    // "toString" can't resolve to an inherited Object property and slip a
+    // non-direction object past the `if (!dir) return` guard. Defensive only:
+    // real keyboards never emit those as event.key, but a synthetic event could.
+    const keyMap = Object.assign(Object.create(null), {
       ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 },
       ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 },
       w: { x: 0, y: -1 }, s: { x: 0, y: 1 },
       a: { x: -1, y: 0 }, d: { x: 1, y: 0 },
-    };
+    });
     const onKey = (e) => {
       if (e.key === 'p' || e.key === 'P') { pause(); return; }
       if ((e.key === 'Enter' || e.key === ' ') && stateRef.current === 'dead') {

@@ -14,29 +14,24 @@
  *   state       string   — game state, drives the pause button label
  *   onPause     function — toggle pause/resume
  */
-import { useState, useEffect, useRef } from 'react';
 import { LEVELS } from '../constants';
 
 export function Scoreboard({ score, best, levelIndex, state, onPause }) {
   const safeIdx = Math.min(Math.max(levelIndex, 0), LEVELS.length - 1);
   const level = LEVELS[safeIdx];
 
-  // flashKey increments on each score increase; changing the key remounts the
-  // span, restarting the CSS animation cleanly without extra state.
-  const [flashKey, setFlashKey] = useState(0);
-  const prevScoreRef = useRef(score);
-  useEffect(() => {
-    if (score > prevScoreRef.current) setFlashKey(k => k + 1);
-    prevScoreRef.current = score;
-  }, [score]);
-
+  // Flash on each score increase without state or effects: keying the span off
+  // `score` remounts it whenever the score changes, which restarts the CSS
+  // animation. The flash class is applied only when score > 0, so the initial
+  // render and a reset-to-0 don't animate. Score only ever increases during
+  // play, so "score changed to a value > 0" is equivalent to "score increased".
   return (
     <div className="scoreboard">
       <div className="score-block">
         <span className="score-label">SCORE</span>
         <span
-          key={flashKey}
-          className={`score-value${flashKey > 0 ? ' score-flash' : ''}`}
+          key={score}
+          className={`score-value${score > 0 ? ' score-flash' : ''}`}
           style={{ color: level.color }}
         >
           {score}

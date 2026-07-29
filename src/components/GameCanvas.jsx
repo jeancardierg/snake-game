@@ -594,8 +594,22 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
     return () => {
       stopped = true;
       cancelAnimationFrame(rafId);
-      bodyGeom.dispose();
+      // Release all GPU resources. renderer.dispose() alone does NOT free
+      // geometries, materials, or textures — walk the scene and dispose them
+      // explicitly to avoid a GPU-memory leak on unmount / StrictMode remount.
+      // (bodyGeom and the two CanvasTextures are reached here via bodyMesh and
+      // material.map, so no separate disposal is needed.)
+      scene.traverse((obj) => {
+        obj.geometry?.dispose();
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (!m) continue;
+          m.map?.dispose();
+          m.dispose();
+        }
+      });
       renderer.dispose();
+      renderer.forceContextLoss();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

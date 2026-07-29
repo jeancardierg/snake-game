@@ -213,6 +213,59 @@ describe('score and level', () => {
   });
 });
 
+// ─── Self-collision (tail-follow) ─────────────────────────────────────────────
+
+describe('self-collision', () => {
+  /**
+   * Lay out an explicit snake in the pool at headIdx 0 and set the live refs.
+   * segs is head-first: segs[0] = head … segs[len-1] = tail.
+   */
+  function placeSnake(result, segs) {
+    act(() => {
+      for (let i = 0; i < segs.length; i++) {
+        segPool[i].x = segs[i].x;
+        segPool[i].y = segs[i].y;
+      }
+      result.current.headIdxRef.current  = 0;
+      result.current.snakeLenRef.current = segs.length;
+    });
+  }
+
+  it('does NOT die when the head moves into the tail cell while not eating', () => {
+    const { result } = renderHook(() => useSnake());
+    // Start moving (dir defaults to RIGHT) and queue a 90° UP turn.
+    act(() => result.current.applyDir(DIR.UP));
+    // Bend the snake so UP from the head lands on the CURRENT tail cell:
+    // head (5,5) --UP--> (5,4); tail is at (5,4) and vacates on this tick.
+    placeSnake(result, [
+      { x: 5, y: 5 }, // head
+      { x: 4, y: 5 },
+      { x: 4, y: 4 },
+      { x: 5, y: 4 }, // tail — the cell the head is about to enter
+    ]);
+    // Food elsewhere → non-eating tick.
+    act(() => { result.current.foodRef.current = { x: 0, y: 0 }; });
+    tick(0);
+    expect(result.current.state).toBe('running');
+  });
+
+  it('DOES die when the head moves into a non-tail body segment', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));
+    // head (5,5) --UP--> (5,4); (5,4) is a MIDDLE segment (tail is elsewhere).
+    placeSnake(result, [
+      { x: 5, y: 5 }, // head
+      { x: 4, y: 5 },
+      { x: 4, y: 4 },
+      { x: 5, y: 4 }, // middle segment lying in the head's path
+      { x: 6, y: 4 }, // tail
+    ]);
+    act(() => { result.current.foodRef.current = { x: 0, y: 0 }; });
+    tick(0);
+    expect(result.current.state).toBe('dead');
+  });
+});
+
 // ─── Visibility auto-pause / auto-resume ─────────────────────────────────────
 
 describe('visibility change', () => {
@@ -265,11 +318,18 @@ describe('visibility change', () => {
 // ─── localStorage resilience ──────────────────────────────────────────────────
 
 describe('localStorage resilience', () => {
-  it('treats corrupt localStorage value as 0', () => {
+  it('treats corrupt localStorage value as 0 (not NaN)', () => {
     localStorage.setItem('snakeBest', 'not-a-number');
     const { result } = renderHook(() => useSnake());
-    // parseInt('not-a-number') = NaN; hook should treat it as 0
-    expect(result.current.best === 0 || isNaN(result.current.best)).toBe(true);
+    // parseInt('not-a-number') = NaN; readBestScore must sanitize it to exactly 0
+    // so it renders correctly and doesn't permanently block best-score updates.
+    expect(result.current.best).toBe(0);
+  });
+
+  it('treats a negative localStorage value as 0', () => {
+    localStorage.setItem('snakeBest', '-50');
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.best).toBe(0);
   });
 
   it('continues without throwing when localStorage.setItem fails', () => {

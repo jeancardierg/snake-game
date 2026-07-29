@@ -91,7 +91,7 @@ function randomFood(headIdx, snakeLen) {
 
   if (free.length === 0) return null;  // board full
   const cell = free[Math.floor(Math.random() * free.length)];
-  return { ...cell, type: Math.floor(Math.random() * 6) };
+  return { ...cell };
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -319,22 +319,9 @@ export function useSnake() {
     snakeLenRef.current = INIT_SNAKE.length;
     dirRef.current      = { x: 1, y: 0 };
     dirQueueRef.current = [];
-    // randomFood on a 3-segment snake has 97 free cells on a 10×10 grid — null is impossible here.
-    // Fallback picks the first free cell deterministically rather than a hardcoded
-    // coordinate that could coincide with the snake if INIT_SNAKE ever changes.
-    const initFood = randomFood(headIdxRef.current, snakeLenRef.current);
-    if (!initFood) {
-      // Should never happen; guard against future INIT_SNAKE changes.
-      const occupied = new Set(INIT_SNAKE.map(s => `${s.x},${s.y}`));
-      for (let x = 0; x < COLS; x++) {
-        for (let y = 0; y < ROWS; y++) {
-          if (!occupied.has(`${x},${y}`)) { foodRef.current = { x, y }; break; }
-        }
-        if (foodRef.current !== undefined) break;
-      }
-    } else {
-      foodRef.current = initFood;
-    }
+    // A 3-segment snake on a 10×10 grid leaves 97 free cells, so randomFood is
+    // never null here (it returns null only when the whole board is occupied).
+    foodRef.current = randomFood(headIdxRef.current, snakeLenRef.current);
     scoreRef.current          = 0;
     levelRef.current          = 0;
     stateRef.current          = 'idle';

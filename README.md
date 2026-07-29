@@ -15,12 +15,13 @@ A classic Snake game built with React, rendered with a **three.js WebGL** engine
 - [File-by-File Reference](#file-by-file-reference)
   - [constants.js](#constantsjs)
   - [pool.js](#pooljs)
+  - [audio.js](#audiojs)
   - [useSnake.js](#usesnakejs)
   - [App.jsx](#appjsx)
   - [GameCanvas.jsx](#gamecanvasjsx)
   - [DPad.jsx](#dpadjsx)
   - [Scoreboard.jsx](#scoreboardjsx)
-  - [LevelBar.jsx](#levelbarju)
+  - [LevelBar.jsx](#levelbarjsx)
   - [Overlay.jsx](#overlayjsx)
   - [index.css](#indexcss)
   - [main.jsx](#mainjsx)
@@ -47,17 +48,19 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 
 ## Features
 
-- **3D WebGL rendering** — Phong-shaded sphere segments with real-time shadows, directional sun + ambient lighting, and a desert ground plane
+- **3D WebGL rendering** — a coral-snake body drawn as one continuous, tapered **spline tube** (yellow/red/black scale bands) with a lateral "slither" wave, real-time shadows, directional sun + ambient lighting, and a grass-green ground plane
+- **Animated snake head** — a sleek wedge head with eyes and a periodically flicking forked tongue, oriented along the direction of travel
 - **5 progressive speed levels** — EASY → MEDIUM → FAST → HYPER → INSANE
 - **Per-food speed boost** — each food eaten within a level shaves 8 ms off the tick interval, up to a hard floor of 40 ms
 - **Automatic level-up** based on score thresholds
-- **6 random fruit types** — each food spawn picks a random fruit (apple, orange, strawberry, banana, watermelon, grape); colour-matched particles burst on eat
+- **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
+- **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
 - **Best score** saved in `localStorage` across sessions
-- **Retina/high-DPI rendering** — WebGL pixel ratio set to `devicePixelRatio` for crisp output on all screens
+- **High-DPI aware** — WebGL pixel ratio is set to `devicePixelRatio`; the drawing buffer is a fixed 200-unit board scaled to fit the container, so it's sharpest on high-DPI / mobile screens
 - **Input queue** — up to 2 direction changes buffered per tick, so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
 - **On-screen D-Pad** — 4-button directional pad for mobile, fires on pointer-down (zero latency)
-- **Swipe controls** — full-screen swipe gesture support on mobile (20 px threshold)
+- **Swipe controls** — swipe gesture support on the game board (20 px threshold)
 - **Full-width mobile layout** — canvas fills the screen edge-to-edge on mobile
 - **Content Security Policy** — CSP meta tag blocks inline scripts and external resources
 - **Accessible** — ARIA labels on D-Pad buttons and canvas, `role="progressbar"` on level bar, focus-visible styles
@@ -76,14 +79,16 @@ snake-react/
 ├── src/
 │   ├── components/
 │   │   ├── DPad.jsx            # On-screen directional pad (mobile)
-│   │   ├── ErrorBoundary.jsx   # React error boundary wrapping the canvas
+│   │   ├── ErrorBoundary.jsx   # React error boundary wrapping the app
 │   │   ├── GameCanvas.jsx      # WebGL renderer (three.js)
 │   │   ├── LevelBar.jsx        # Progress bar to next level
 │   │   ├── Overlay.jsx         # Idle / Paused / Game Over screens
-│   │   └── Scoreboard.jsx      # Score, best score, level badge
+│   │   └── Scoreboard.jsx      # Score, best score, level badge + pause button
 │   ├── hooks/
 │   │   └── useSnake.js         # All game logic (single source of truth)
+│   ├── test/                   # Vitest unit + hook tests
 │   ├── App.jsx                 # Root component — wires everything together
+│   ├── audio.js                # 8-bit sound effects (Web Audio API)
 │   ├── constants.js            # Grid dimensions, level configs, input constants
 │   ├── index.css               # Global styles and layout
 │   ├── main.jsx                # React entry point
@@ -103,15 +108,15 @@ App.jsx
   ├── useSnake()          ← all state + logic lives here
   │     ├── headIdxRef    ← head index into the shared segment ring buffer
   │     ├── snakeLenRef   ← live segment count
-  │     ├── foodRef       ← current food {x, y, type}
+  │     ├── foodRef       ← current food {x, y}
   │     ├── score         ← current score
   │     ├── best          ← all-time best (localStorage)
   │     ├── levelIndex    ← current level (0–4)
   │     └── state         ← 'idle' | 'running' | 'paused' | 'dead'
   │
-  ├── <Scoreboard>        ← reads: score, best, levelIndex
+  ├── <Scoreboard>        ← reads: score, best, levelIndex, state
   ├── <LevelBar>          ← reads: score, levelIndex
-  ├── <GameCanvas>        ← reads refs: headIdxRef, snakeLenRef, foodRef → renders via WebGL
+  ├── <GameCanvas>        ← reads refs: headIdxRef, snakeLenRef, foodRef (+ levelIndex, stateRef) → renders via WebGL
   ├── <DPad>              ← calls: applyDir
   └── <Overlay>           ← reads: state, score, levelIndex
 ```
@@ -171,6 +176,25 @@ Pre-allocates `POOL_SIZE = COLS × ROWS = 100` `{x, y}` objects as a circular ri
 
 ---
 
+### `audio.js`
+
+Retro 8-bit sound effects synthesized at runtime with the **Web Audio API** — no
+audio files shipped. A single `AudioContext` is created lazily on first use (the
+browser autoplay policy requires creation during a user gesture) and resumed if
+suspended.
+
+| Export | Sound |
+|--------|-------|
+| `playStart()`   | Ascending C5→E5→G5 arpeggio (square wave) |
+| `playEat()`     | Short A5→C6 chirp |
+| `playLevelUp()` | 4-note ascending fanfare (sawtooth) |
+| `playDeath()`   | Descending C5→C3 slide |
+
+`useSnake` calls these from the tick loop and state transitions; if the Web Audio
+API is unavailable the calls are silent no-ops.
+
+---
+
 ### `useSnake.js`
 
 **The entire game engine.** This single custom hook contains all state, all refs, all game logic, and all side effects.
@@ -181,7 +205,7 @@ Pre-allocates `POOL_SIZE = COLS × ROWS = 100` `{x, y}` objects as a circular ri
 |------|------|---------|
 | `headIdxRef` | `number` | Index of the head segment in `segPool` |
 | `snakeLenRef` | `number` | Current live segment count |
-| `foodRef` | `{x,y,type}` | Current food cell + fruit type (0–5) |
+| `foodRef` | `{x,y}` | Current food cell (the mine) |
 | `score` / `scoreRef` | `number` | Current score (10 pts per food) |
 | `best` / `bestRef` | `number` | All-time best, persisted in `localStorage` |
 | `levelIndex` / `levelRef` | `number` | Current level index (0–4) |
@@ -236,7 +260,7 @@ Resets to the new base speed on every level-up. `speedRef` persists the current 
 Validates against the last queued direction, then pushes to `dirQueueRef`. If `state === 'idle'`, transitions to `running` and starts the loop — the idle check runs **before** direction filters so all four directions can start the game (including LEFT/RIGHT which would otherwise be filtered against `INIT_DIR = {x:1, y:0}`).
 
 **`randomFood(headIdx, snakeLen)`**
-Builds the occupied set in one pass through `segPool`, collects all free cells, picks uniformly at random. Returns `null` only when all 100 cells are occupied (board full). Food object includes `.type = Math.floor(Math.random() * 6)` for fruit selection.
+Builds the occupied set in one pass through `segPool`, collects all free cells, picks uniformly at random. Returns `null` only when all 100 cells are occupied (board full).
 
 #### Side effects
 
@@ -260,30 +284,35 @@ Maintains `stateRef` and `scoreRef` — plain ref mirrors of React state that `G
 
 ### `GameCanvas.jsx`
 
-Renders the game board using a **three.js WebGL** renderer.
+Renders the game board using a **three.js WebGL** renderer. The scene is created
+once on mount and fully disposed on unmount — geometries, materials, and textures
+are walked and released (`renderer.dispose()` alone does not free them), avoiding
+a GPU-memory leak on remount / React Strict Mode.
 
 #### Scene setup (created once on mount, disposed on unmount)
 
 | Object | Description |
 |--------|-------------|
-| `WebGLRenderer` | Targets the `<canvas>` element; `setPixelRatio(devicePixelRatio)` for Retina |
+| `WebGLRenderer` | Targets the `<canvas>` element; `setPixelRatio(devicePixelRatio)`; fixed 200×200-unit drawing buffer, CSS-scaled to the container |
 | `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (100)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
-| `AmbientLight(0xffe8c8, 0.55)` | Warm base fill — prevents pure-shadow areas going black |
-| `DirectionalLight(0xfffde8, 1.1)` | Sun from upper-left; casts `PCFSoftShadowMap` shadows on the ground |
-| `DirectionalLight(0xc8e8ff, 0.25)` | Cool fill from lower-right for depth separation |
-| `PlaneGeometry(SIZE, SIZE)` | Sandy desert ground, `receiveShadow = true` |
+| `AmbientLight(0xfff6ec, 0.4)` | Warm-neutral base fill — prevents pure-shadow areas going black |
+| `DirectionalLight(0xfff4e0, 0.85)` | Sun from the upper-left; casts `PCFSoftShadowMap` shadows on the ground |
+| `DirectionalLight(0x6688aa, 0.2)` | Cool fill from the lower-right for depth separation |
+| `PlaneGeometry(SIZE, SIZE)` | Grass-green ground (`0x4a9d3f`), `receiveShadow = true`; scene background is a darker green |
 | `LineSegments` | Grid cell borders at Y=0.5 |
 
 #### Snake rendering
 
-- **Body segments**: `SphereGeometry(r=8.2, 20 width, 14 height segments)` with dark-green `MeshPhongMaterial`. One mesh per pool slot (100 total), hidden when not in the active snake. Each frame positions only the live `snakeLenRef` segments — O(snakeLen) per frame.
-- **Head**: Larger `SphereGeometry(r=9.4)` with brighter specular. Two eye sub-meshes (gold sphere + black pupil) are parented to the head mesh and rotate with it automatically.
-- **Head direction**: `headMesh.rotation.y = atan2(dx, dz)` computed from the head→neck vector each frame.
-- **Head interpolation**: Measures the real tick interval, sets `interpDuration = measured × 0.88`, and linearly interpolates the head's world position between grid cells each rAF frame for smooth movement.
+The snake body is **one continuous tube**, not a chain of spheres:
+
+- **Body**: a single `BufferGeometry` of fixed capacity, rebuilt in place every frame (`setDrawRange` controls the live length — no per-frame allocation). A Catmull-Rom spline is fit through the interpolated segment centers and sampled into rings; the tube **tapers** neck → tail and carries a lateral **slither wave** whose amplitude ramps from 0 at the head so the head stays grid-accurate. The coral-snake **scale texture** (yellow → red → yellow → black bands, built by `makeSnakeBodyTexture`) repeats along the length.
+- **Head**: a scaled `SphereGeometry` wedge (slim, elongated, `−Z` = forward) with two eyes (gold sphere + black pupil) and a **forked tongue** that flicks periodically while running — all parented to the head so they move and rotate with it.
+- **Head direction**: `headMesh.rotation.y = atan2(−ndx, −ndz)` from the head→neck vector each frame (the snout faces `−Z`).
+- **Head interpolation**: measures the real tick interval, sets `interpDuration = measured × 0.92` (clamped 40–400 ms), and smoothstep-interpolates the head between grid cells each rAF frame for fluid movement.
 
 #### Food rendering
 
-Six `SphereGeometry` meshes (one per fruit type) are pre-created with distinct `MeshPhongMaterial` colours. Only the current food's mesh is visible; it rotates `+0.022 rad/frame` around Y for a spin effect.
+The food is a **mine**: a `Group` containing a dark metallic `SphereGeometry`, **8 cone spikes**, and a small **red detonator** on top that blinks (emissive sine pulse). The whole group spins slowly around Y.
 
 #### Coordinate mapping
 
@@ -301,7 +330,7 @@ Camera at `(0, 300, 0)` with `up = (0, 0, −1)`: smaller Z → higher on screen
 |--------|---------------|
 | Death camera shake | `cam.position.x/z = amp × sin/cos(t)` over 500 ms |
 | Eat point-light flash | `PointLight` at eaten food's world position, intensity decays −0.2/frame |
-| Eat particle burst | `THREE.Points` (`BufferGeometry`); 12 particles per eat, colour from fruit type |
+| Eat particle burst | `THREE.Points` (`BufferGeometry`); 12 particles per eat, fixed orange (`0xff4400`) |
 | All inter-frame state | `animRef` (single object ref, no React overhead) |
 
 ---
@@ -321,8 +350,8 @@ On-screen 4-button directional pad for mobile players.
 ### `Scoreboard.jsx`
 
 Purely presentational. Displays:
-- **SCORE** — current score, coloured with the level accent colour
-- **Level badge** — level name with a tinted background
+- **SCORE** — current score, coloured with the level accent colour; flashes on each increase by re-keying the `<span>` off `score` (no state, no effect)
+- **Level badge** — level name with a tinted background, plus a **Pause / Resume button** directly below it (disabled while idle or dead)
 - **BEST** — all-time best score
 
 ---
@@ -389,10 +418,12 @@ GitHub Actions workflow on push to `master`:
 
 1. Checkout + Node 20 setup with npm cache
 2. `npm ci` — clean install from lockfile
-3. `npm audit --omit=dev` — fails the build if any production dependency has a known vulnerability
-4. `npm run build` → `dist/`
-5. Upload `dist/` as GitHub Pages artifact
-6. Deploy via OIDC authentication (no secrets required)
+3. `npm run lint` — ESLint gate
+4. `npm test` — Vitest suite gate
+5. `npm audit --omit=dev --audit-level=high` — fails the build on any high/critical production-dependency vulnerability
+6. `npm run build` → `dist/`
+7. Upload `dist/` as GitHub Pages artifact
+8. Deploy via OIDC authentication (no secrets required)
 
 `concurrency: cancel-in-progress: true` ensures only one deployment runs at a time.
 
@@ -489,7 +520,7 @@ Open http://localhost:5173/snake-game/ in your browser.
 
 ## Deployment
 
-Deployment is fully automatic. Every push to `master` triggers the GitHub Actions workflow in `.github/workflows/deploy.yml`, which builds the project and pushes it to the `github-pages` environment.
+Deployment is fully automatic. Every push to `master` triggers the GitHub Actions workflow in `.github/workflows/deploy.yml`, which lints, tests, audits, builds the project, and pushes it to the `github-pages` environment.
 
 ```bash
 git add .
@@ -508,6 +539,7 @@ The site updates in ~30 seconds.
 | React | 19 | UI component model |
 | Vite | 8 | Dev server + build tool |
 | three.js | 0.183 | WebGL 3D renderer |
+| Web Audio API | — | Synthesized 8-bit sound effects |
 | Vitest | 4 | Unit testing |
 | GitHub Actions | — | CI/CD (build + audit + deploy) |
 | GitHub Pages | — | Static hosting |

@@ -1,6 +1,6 @@
 # Snake — React + Vite
 
-A classic Snake game built with React, rendered with a **three.js WebGL** engine, and deployed automatically to GitHub Pages via GitHub Actions.
+Classic Snake game with progressive speed levels (EASY→INSANE), 3D WebGL rendering via three.js, and 8-bit audio. Built with React + Vite; auto-deployed to GitHub Pages.
 
 **Live demo:** https://jeancardierg.github.io/snake-game/
 

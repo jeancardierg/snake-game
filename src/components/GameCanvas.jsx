@@ -546,7 +546,10 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, levelIndex, state
         const ndx  = Math.abs(dx) > 1 ? -Math.sign(dx) : dx;
         const ndz  = Math.abs(dz) > 1 ? -Math.sign(dz) : dz;
         if (ndx !== 0 || ndz !== 0) {
-          headMesh.rotation.y = Math.atan2(ndx, ndz);
+          // Head geometry faces −Z (eyes + tongue on the −Z snout), so the snout
+          // points along the travel vector (ndx,ndz) only at atan2(−ndx,−ndz);
+          // plain atan2(ndx,ndz) aims it 180° backward.
+          headMesh.rotation.y = Math.atan2(-ndx, -ndz);
         }
       }
 

@@ -51,16 +51,23 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
   runs before `npm run build` in `.github/workflows/deploy.yml`, so a high or
   critical production advisory fails the deploy.
 - Dev-only dependencies are **not** covered by that gate and are not shipped to the
-  browser bundle — they run only on a developer machine or a CI runner. `npm audit`
-  without `--omit=dev` does currently report advisories reaching the dev tree
-  (`jsdom` → `undici`); they do not affect the deployed site.
+  browser bundle — they run only on a developer machine or a CI runner. Advisories
+  that surface under a plain `npm audit` but disappear under `--omit=dev` therefore
+  cannot reach the deployed site. Fix them on their own merits, not as releng
+  emergencies. (The dev tree is clean as of the undici bump in #26; nothing enforces
+  that, so run `npm audit` to check rather than trusting this sentence.)
 - There is no `.github/dependabot.yml` in this repo, so there are **no scheduled
   version-update PRs**. Dependency bumps arrive only from repository-level
   Dependabot *security* updates, which need no config file. Add a
   `.github/dependabot.yml` if routine version updates are wanted.
-- `package.json` pins two transitive versions through `overrides` (`undici`,
-  `@babel/core`). A pin silences an advisory at the version it names — re-check it
-  when a newer advisory lands, or the pin becomes the thing holding the tree back.
+- `package.json` forces two transitive versions through `overrides`: `undici`
+  (`^7.29.0`) and `@babel/core` (`^7.29.6`). Both are floors, not exact pins, so
+  patch and minor fixes still flow through.
+- **Keep them as ranges.** `undici` was previously an exact pin at `7.28.0`, added to
+  clear an advisory. Later advisories were patched in `7.29.0`, which the pin made
+  unreachable — so the override became the reason the tree could not be fixed, and
+  Dependabot's security-update run failed against it until #26 widened it to a caret
+  range. An exact pin in `overrides` is a dependency that only a human can bump.
 
 ## Reporting
 

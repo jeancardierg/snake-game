@@ -34,6 +34,7 @@ Classic Snake game with endless procedurally generated levels — each with its 
 - [Running Locally](#running-locally)
 - [Deployment](#deployment)
 - [Tech Stack](#tech-stack)
+- [License](#license)
 
 ---
 
@@ -108,6 +109,7 @@ snake-game/                     # repo root (package name is "snake-react")
 ├── eslint.config.js            # ESLint flat config
 ├── SECURITY.md                 # Security model, CSP rationale, threat notes
 ├── CLAUDE.md                   # Agent/contributor working rules for this repo
+├── LICENSE                     # GPL-3.0 (verbatim)
 └── package.json
 ```
 
@@ -706,3 +708,20 @@ The site updates in ~30 seconds.
 | Vitest | 4 | Unit + hook testing (jsdom) |
 | GitHub Actions | — | CI/CD (build + audit + deploy) |
 | GitHub Pages | — | Static hosting |
+
+---
+
+## License
+
+Copyright © 2026 jeancardierg
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, version 3.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the [GNU General Public License](LICENSE) for more details.
+
+GPL-3.0 is a copyleft license: anyone distributing this project or a derivative
+must release their version under GPL-3.0 as well, with source available.

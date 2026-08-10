@@ -47,9 +47,20 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
 ## Dependencies
 
 - Production dependencies are audited in CI (`npm audit --omit=dev --audit-level=high`)
-  and currently report **0 vulnerabilities**.
-- Dev-only dependencies are updated via Dependabot; they are not shipped to the
-  browser bundle.
+  and currently report **0 vulnerabilities**. That gate is the release blocker: it
+  runs before `npm run build` in `.github/workflows/deploy.yml`, so a high or
+  critical production advisory fails the deploy.
+- Dev-only dependencies are **not** covered by that gate and are not shipped to the
+  browser bundle — they run only on a developer machine or a CI runner. `npm audit`
+  without `--omit=dev` does currently report advisories reaching the dev tree
+  (`jsdom` → `undici`); they do not affect the deployed site.
+- There is no `.github/dependabot.yml` in this repo, so there are **no scheduled
+  version-update PRs**. Dependency bumps arrive only from repository-level
+  Dependabot *security* updates, which need no config file. Add a
+  `.github/dependabot.yml` if routine version updates are wanted.
+- `package.json` pins two transitive versions through `overrides` (`undici`,
+  `@babel/core`). A pin silences an advisory at the version it names — re-check it
+  when a newer advisory lands, or the pin becomes the thing holding the tree back.
 
 ## Reporting
 

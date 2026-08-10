@@ -25,6 +25,7 @@ Classic Snake game with endless procedurally generated levels — each with its 
   - [Scoreboard.jsx](#scoreboardjsx)
   - [LevelBar.jsx](#levelbarjsx)
   - [Overlay.jsx](#overlayjsx)
+  - [ErrorBoundary.jsx](#errorboundaryjsx)
   - [index.css](#indexcss)
   - [main.jsx](#mainjsx)
   - [vite.config.js](#viteconfigjs)
@@ -43,6 +44,7 @@ Classic Snake game with endless procedurally generated levels — each with its 
 | Move | Arrow keys or WASD | Swipe in any direction | On-screen D-Pad buttons |
 | Pause / Resume | `P` | Pause button | Pause button |
 | Restart (after death) | `Enter` or `Space` | Play Again button | Play Again button |
+| Mute / Unmute music | — | 🔊 Music button | 🔊 Music button |
 
 The snake starts moving as soon as you press a direction key, swipe, or tap a D-Pad button.
 
@@ -56,18 +58,18 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 - **Level identity** — every level has a stable id (`L07`) and title (`LEVEL 07 · NEBULA`) shown in the Overlay, in the Scoreboard badge, and in a transient level-up banner over the live board
 - **Per-level visual themes** — 10 hand-authored palettes (ground, sky, grid, lighting, food, walls) that cycle with a hue rotation, applied to the three.js scene in place
 - **Generated obstacle layouts** — 4-way mirrored patterns (pillars, corners, cross, diagonal, ring) that grow denser with level, always validated reachable and always clear of the spawn runway
-- **8-bit background music** — a two-bar chiptune loop per level (square lead, triangle bass, noise percussion), generated from the level seed and synthesized live; mutable, with the choice persisted
+- **8-bit background music** — a two-bar chiptune loop per level (square lead, triangle bass, noise percussion), generated from the level seed and synthesized live; can be muted with the 🔊 Music button, and the choice is persisted in `localStorage`
 - **Per-food speed boost** — each food eaten within a level shaves 8 ms off the tick interval, up to a hard floor of 40 ms
 - **Automatic level-up** based on score thresholds derived from a foods-per-level quota
 - **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
 - **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
 - **Best score** saved in `localStorage` across sessions
 - **High-DPI aware** — WebGL pixel ratio is set to `devicePixelRatio`; the drawing buffer is a fixed 200-unit board scaled to fit the container, so it's sharpest on high-DPI / mobile screens
-- **Input queue** — up to 2 direction changes buffered per tick, so rapid inputs are never lost
+- **Input queue** — up to 2 direction changes buffered at a time (one is consumed per tick), so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
 - **On-screen D-Pad** — 4-button directional pad for mobile, fires on pointer-down (zero latency)
 - **Swipe controls** — swipe gesture support on the game board (20 px threshold)
-- **Full-width mobile layout** — canvas fills the screen edge-to-edge on mobile
+- **Full-width mobile layout** — the canvas fills the available width on mobile (capped at 400 px); the surrounding column is capped at 420 px from 900 px up
 - **Content Security Policy** — CSP meta tag blocks inline scripts and external resources
 - **Accessible** — ARIA labels on D-Pad buttons and canvas, `role="progressbar"` on level bar, focus-visible styles
 
@@ -76,7 +78,7 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 ## Project Structure
 
 ```
-snake-react/
+snake-game/                     # repo root (package name is "snake-react")
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml          # Auto-deploy to GitHub Pages on push to master
@@ -102,7 +104,10 @@ snake-react/
 │   ├── main.jsx                # React entry point
 │   └── pool.js                 # Circular ring-buffer for zero-allocation segments
 ├── index.html                  # HTML shell (includes CSP meta tag)
-├── vite.config.js              # Vite build config
+├── vite.config.js              # Vite build config + Vitest (jsdom) config
+├── eslint.config.js            # ESLint flat config
+├── SECURITY.md                 # Security model, CSP rationale, threat notes
+├── CLAUDE.md                   # Agent/contributor working rules for this repo
 └── package.json
 ```
 
@@ -128,7 +133,8 @@ App.jsx
   ├── <LevelBar>          ← reads: score, levelIndex
   ├── <GameCanvas>        ← reads refs: headIdxRef, snakeLenRef, foodRef, obstaclesRef (+ levelIndex, stateRef) → renders via WebGL
   ├── <DPad>              ← calls: applyDir
-  └── <Overlay>           ← reads: state, score, levelIndex, banner
+  ├── <Overlay>           ← reads: state, score, levelIndex, banner
+  └── controls-hint       ← Pause / Reset buttons + music mute toggle (music.js)
 ```
 
 Level data is not part of that flow: `getLevel(n)` in `levels.js` is a pure, memoized function, so every component derives speed, theme, identifier and music from `levelIndex` on its own rather than threading a level object through props.
@@ -196,12 +202,12 @@ Deterministic infinite level generator. Level *N* is derived entirely from *N* �
 ```
 foodsForLevel(n) = min(FOODS_MAX, FOODS_BASE + floor(n × FOODS_PER_LEVEL))
 scoreNextFor(n)  = Σ foodsForLevel(0..n) × 10        // strictly increasing
-speedForLevel(n) = max(SPEED_FLOOR, BASE_SPEED × SPEED_DECAY^n)
+speedForLevel(n) = max(SPEED_FLOOR, round(BASE_SPEED × SPEED_DECAY^n))
 ```
 
 Since every food is worth exactly 10 points, "eat N foods to clear the level" and "cross score threshold T" are the same mechanism — which is why the engine keeps its original threshold-driven level-up code.
 
-**Themes.** 10 hand-authored palettes. Past the first cycle each palette is reused with every color hue-rotated by `37° × cycle`, and the label gains a numeral (`FAST II`, `HYPER III`) — so level 13 is visibly and audibly distinct from level 3.
+**Themes.** 10 hand-authored palettes. Past the first cycle each palette is reused with its scene colors (`bg`, `ground`, `grid`, `obstacle`, `fill`) hue-rotated by `37° × cycle`, and the label gains a numeral (`FAST II`, `HYPER III`) — so level 13 is visibly and audibly distinct from level 3. The two light tints (`ambient`, `sun`) and `food` are deliberately left un-rotated, so lighting stays neutral and the mine stays near-black at every cycle.
 
 **Obstacles.** Built from 4-way mirrored groups so layouts read as designed rather than as noise. A group is taken only if it fits entirely within the cell budget and touches no reserved cell; partial groups would break the symmetry.
 
@@ -263,7 +269,7 @@ synthesis sidesteps the policy entirely and needs no change to it.
 | Export | Description |
 |--------|-------------|
 | `startMusic(track)` | Start or switch to a level's track; restarts the loop from step 0 |
-| `stopMusic()` | Stop the scheduler and fade out any already-queued notes |
+| `stopMusic({ keepTrack })` | Stop the scheduler and fade out any already-queued notes; `keepTrack: true` remembers the descriptor so resume/unmute can pick it back up |
 | `pauseMusic()` / `resumeMusic()` | Suspend and restore, keeping the current track |
 | `setMusicEnabled(bool)` / `isMusicEnabled()` | Mute toggle, persisted in `localStorage` under `snakeMusic` |
 | `buildPattern(track)` | Compile a track descriptor into a two-bar pattern (exported for tests) |
@@ -280,7 +286,8 @@ instantly clicks audibly at 16th-note density.
 
 **Patterns** are generated from the level's `music` descriptor with the same
 seeded PRNG as the layouts, so a given level always sounds the same and
-different levels do not.
+different levels do not. Tempo is not fixed per theme: `levels.js` adds `2 × n` BPM
+to the base tempo, capped at 180, so the track tightens as the run goes on.
 
 Every entry point is a no-op when `getCtx()` returns `null`. That is not
 cosmetic: jsdom has no `AudioContext`, and the hook tests drive
@@ -311,6 +318,8 @@ threw without Web Audio would break the whole suite.
 | `speedRef` | `number` | Current tick interval in ms (preserves boost across pause/resume) |
 | `foodsThisLevelRef` | `number` | Foods eaten in current level (drives per-food speed boost) |
 | `intervalRef` | `number` | ID of the active `setInterval` |
+| `tickRef` | `function` | Latest `tick` closure; the interval calls `tickRef.current()` so it never runs a stale one |
+| `bannerTimerRef` | `number` | ID of the timer that clears `banner` |
 
 #### Game state machine
 
@@ -323,7 +332,7 @@ threw without Web Audio would break the whole suite.
            │           paused         │
            └──────────────────────────┘
                           │
-                      wall/self hit
+                wall / obstacle / self hit
                           │
                           ▼
                         dead
@@ -337,13 +346,16 @@ threw without Web Audio would break the whole suite.
 #### Key functions
 
 **`tick()`**
-Called by `setInterval` every N milliseconds.
-1. Dequeues the next direction (rejects 180° reversals and duplicates).
-2. Computes new head position via `poolPrepend`.
+Called by `setInterval` every N milliseconds. Collision checks all run **before** the
+head is written into the ring buffer, so a fatal move never mutates `segPool`.
+1. Dequeues the next direction (rejects 180° reversals).
+2. Computes the candidate head position (`head + dir`).
 3. Wall collision → `die()`.
-4. Self collision → `die()`.
-5. Food eaten → score +10, level-up check, per-food speed boost, new food spawned.
-6. Not food → `snakeLenRef -= 1` (tail slot stays in pool, gets overwritten on the next prepend).
+4. Obstacle collision (`obstaclesRef.current.set` lookup) → `die()` — a generated wall is as fatal as the board edge.
+5. Self collision → `die()`. Index 0 is skipped (the old head cell can never equal the new one), and when the snake is **not** eating the tail is skipped too: it vacates its cell on this same tick, so moving into it is legal (canonical Snake). When eating, the tail stays put and the full body is checked.
+6. Commits the head via `poolPrepend` and increments `snakeLenRef`.
+7. Food eaten → score +10, best-score update, level-up check, per-food speed boost, new food spawned.
+8. Not food → `snakeLenRef -= 1` (tail slot stays in pool, gets overwritten on the next prepend).
 
 **Per-food speed boost:**
 ```js
@@ -355,16 +367,16 @@ Resets to the new base speed on every level-up. `speedRef` persists the current 
 **`applyDir(newDir)`**
 Validates against the last queued direction, then pushes to `dirQueueRef`. If `state === 'idle'`, transitions to `running` and starts the loop — the idle check runs **before** direction filters so all four directions can start the game (including LEFT/RIGHT which would otherwise be filtered against `INIT_DIR = {x:1, y:0}`).
 
-**`randomFood(headIdx, snakeLen)`**
-Builds the occupied set in one pass through `segPool`, collects all free cells, picks uniformly at random. Returns `null` only when all 100 cells are occupied (board full).
+**`randomFood(headIdx, snakeLen, obstacles)`**
+Seeds the occupied set from the level's obstacle keys, adds every snake cell in one pass through `segPool`, collects all free cells, then picks uniformly at random. Returns `null` only when no free cell is left (snake + obstacles cover the board).
 
 #### Side effects
 
 | Effect | Purpose |
 |--------|---------|
-| `window.addEventListener('keydown', ...)` | Keyboard input (arrows, WASD, P, Enter/Space) |
-| `document.addEventListener('visibilitychange', ...)` | Auto-pause on tab switch |
-| `useEffect(() => () => stopLoop(), [])` | Clears interval on unmount |
+| `window.addEventListener('keydown', ...)` | Keyboard input (arrows, WASD, P, Enter/Space). The key→direction map is prototype-free, so a synthetic `__proto__`/`toString` key can't resolve to an inherited property |
+| `document.addEventListener('visibilitychange', ...)` | Auto-pause on tab switch. Only an auto-pause is auto-resumed — a manual pause survives the tab coming back |
+| Unmount cleanup | Clears the tick interval, calls `stopMusic()` (the scheduler interval would otherwise outlive the component), and clears the banner timer |
 
 ---
 
@@ -374,7 +386,9 @@ The root component. Calls `useSnake()` and distributes the returned values to ch
 
 Swipe gesture detection runs here: `onTouchStart` records the finger's starting position; `onTouchEnd` computes the delta and calls `applyDir` based on the dominant axis. A `SWIPE_THRESHOLD` (20 px) filters accidental micro-movements. `touchAction: 'none'` prevents browser scroll/zoom interference.
 
-Maintains `stateRef` and `scoreRef` — plain ref mirrors of React state that `GameCanvas`'s rAF loop can read without triggering re-renders.
+Maintains `stateRef` — a plain ref mirror of the `state` value that `GameCanvas`'s rAF loop reads without triggering re-renders (it drives the slither/tongue animation and the death shake).
+
+Also owns the music mute mirror: `music.js` holds the preference and its `localStorage` persistence, and `App` keeps a `musicOn` state only so the 🔊 Music button label re-renders. The `.controls-hint` row below the D-Pad holds that button plus Pause and Reset.
 
 ---
 
@@ -486,7 +500,7 @@ Semi-transparent panel rendered over the canvas for non-running states, plus a t
 
 | `state` | Shows |
 |---------|-------|
-| `idle` | Title "SNAKE" + level title + swipe/keyboard/D-Pad hints |
+| `idle` | Title "SNAKE" + level title + keyboard / pause / D-Pad hints |
 | `paused` | "PAUSED" + level title + Resume button |
 | `dead` | "GAME OVER" + final score + level title reached + Play Again button |
 | `running` | Nothing — unless `banner` is set, then only the level-up banner |
@@ -494,6 +508,19 @@ Semi-transparent panel rendered over the canvas for non-running states, plus a t
 The level identifier (`LEVEL 07 · NEBULA`) is rendered in `.overlay-level-id`, tinted with the level accent color.
 
 The banner is the one thing that renders while the game is running. It is `pointer-events: none` and has no backdrop, so it announces the new level without interrupting play. It is owned by `useSnake` rather than derived in `App` from a `levelIndex` change, because only the hook knows when an advance actually happened — a reset back to the same index must not re-announce it.
+
+---
+
+### `ErrorBoundary.jsx`
+
+Class component wrapping the whole app in `main.jsx`. Catches unhandled render and
+lifecycle errors below it and shows a "GAME CRASHED" fallback with the error message
+and a **Try Again** button (which clears `hasError` and re-renders the tree) instead
+of a blank screen.
+
+It is a class because error boundaries have no hooks equivalent as of React 19 —
+`getDerivedStateFromError` (switch to the fallback in the same render pass) and
+`componentDidCatch` (logs `error` + `info.componentStack`) exist only on classes.
 
 ---
 
@@ -513,7 +540,8 @@ Global styles with a dark theme. Key sections:
 
 ### `main.jsx`
 
-Standard Vite + React entry point. Mounts `<App>` inside React's `StrictMode` into `#root`.
+Standard Vite + React entry point. Mounts `<App>` into `#root`, wrapped in
+[`<ErrorBoundary>`](#errorboundaryjsx) inside React's `StrictMode`.
 
 ---
 
@@ -537,8 +565,9 @@ GitHub Actions workflow on push to `master`:
 4. `npm test` — Vitest suite gate
 5. `npm audit --omit=dev --audit-level=high` — fails the build on any high/critical production-dependency vulnerability
 6. `npm run build` → `dist/`
-7. Upload `dist/` as GitHub Pages artifact
-8. Deploy via OIDC authentication (no secrets required)
+7. `actions/configure-pages` — resolves the Pages deployment target
+8. Upload `dist/` as GitHub Pages artifact
+9. Deploy via OIDC authentication (`id-token: write`, no secrets required)
 
 `concurrency: cancel-in-progress: true` ensures only one deployment runs at a time.
 
@@ -554,20 +583,27 @@ Every N milliseconds (N = current boosted speed):
 tick()
  │
  ├─ Dequeue next direction from dirQueueRef
- │   └─ Reject 180° reversals and no-ops
+ │   └─ Reject 180° reversals
  │
- ├─ newHead = poolPrepend(headIdx, head.x + dir.x, head.y + dir.y)
+ ├─ candidate head = (head.x + dir.x, head.y + dir.y)     ← not committed yet
  │
- ├─ Wall check: head.x < 0 or >= COLS, head.y < 0 or >= ROWS → die()
+ ├─ Wall check:     hx < 0 or >= COLS, hy < 0 or >= ROWS  → die()
  │
- ├─ Self check: any active segment == head → die()
+ ├─ Obstacle check: obstaclesRef.set.has(hx * ROWS + hy)  → die()
+ │
+ ├─ Self check:     body segments 1..checkLen == head     → die()
+ │   └─ checkLen = snakeLen when eating, snakeLen − 1 otherwise
+ │      (the tail vacates its cell this tick, so entering it is legal)
+ │
+ ├─ headIdx = poolPrepend(headIdx, hx, hy);  snakeLen++
  │
  ├─ Ate food?
- │   ├─ YES → score += 10, level-up check, speed boost, new food spawned
- │   │         (snakeLenRef unchanged → body grows by 1 via the prepended head)
+ │   ├─ YES → score += 10, best check, level-up check, speed boost, new food spawned
+ │   │         (the tick's snakeLen++ is kept → body is 1 longer)
  │   └─ NO  → snakeLenRef -= 1  (old tail slot stays, overwritten on next prepend)
  │
- └─ Update headIdxRef; call setScore/setState for React re-render
+ └─ setScore / setLevel / setState only when those values actually changed —
+    snake and food positions never go through React at all
 ```
 
 ### Direction queue
@@ -614,7 +650,8 @@ Level-up restarts the interval at the new base speed, resets `foodsThisLevel`, i
 
 ## Running Locally
 
-**Requirements:** Node.js 18+ and npm.
+**Requirements:** Node.js `^20.19.0 || >=22.12.0` and npm. (Vite 8 and jsdom 29 both
+refuse older runtimes — Node 18 will not build or test this project. CI runs Node 20.)
 
 ```bash
 git clone https://github.com/jeancardierg/snake-game.git
@@ -633,7 +670,8 @@ Open http://localhost:5173/snake-game/ in your browser.
 | `npm run build` | Build for production into `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
-| `npm test` | Run Vitest unit tests |
+| `npm test` | Run the Vitest suite once (140 tests across 5 files) |
+| `npm run test:watch` | Run Vitest in watch mode |
 
 **Jumping to a level.** Append `?level=N` (0-based) to the URL to start on that
 level — e.g. http://localhost:5173/snake-game/?level=12. Reaching a late level
@@ -664,7 +702,7 @@ The site updates in ~30 seconds.
 | React | 19 | UI component model |
 | Vite | 8 | Dev server + build tool |
 | three.js | 0.183 | WebGL 3D renderer |
-| Web Audio API | — | Synthesized 8-bit sound effects |
-| Vitest | 4 | Unit testing |
+| Web Audio API | — | Synthesized 8-bit sound effects + background music |
+| Vitest | 4 | Unit + hook testing (jsdom) |
 | GitHub Actions | — | CI/CD (build + audit + deploy) |
 | GitHub Pages | — | Static hosting |

@@ -12,6 +12,8 @@
  *   - Grass-green ground plane + grid lines
  *   - Directional sun + ambient + fill lights, PCFSoft shadow map
  *   - Point-light flash on eat, particle burst, camera shake on death
+ *   - Wrap mode: pulsing portal glow on the board edges, and a snake that slides
+ *     through one edge and out of the opposite one (see "Wrap rendering" below)
  *
  * All game state is read from refs every frame (no React reconciliation per tick).
  * The three.js scene is created once on mount and torn down on unmount.
@@ -37,6 +39,54 @@ function worldZ(row) { return row * CELL - HALF + CELL / 2; }
 // Map grid cell (col, row) to world XZ position (Y=height)
 function cellToWorld(col, row, height = 0) {
   return new THREE.Vector3(worldX(col), height, worldZ(row));
+}
+
+// ─── Wrap rendering ───────────────────────────────────────────────────────────
+// In wrap mode the snake is laid out along an "unwrapped" path: every segment is
+// placed next to its predecessor, even when that runs off the board. The tube is
+// built once along that continuous path, then drawn again shifted by whole board
+// widths for every board-sized tile the path touches. The orthographic camera
+// frustum is exactly the board, so the off-board part of each copy is cut away
+// for free — no clipping planes, and the body-building code is unchanged.
+
+// Shortest signed grid delta on a ring of size n: a step across an edge reads
+// as ±1 instead of ∓(n-1).
+function wrapDelta(d, n) { return d - n * Math.round(d / n); }
+
+// Tiles are identified by integer (kx, kz): tile (0,0) is the board itself.
+const TILE_BIAS   = 512;   // keeps packed keys non-negative (|k| ≤ POOL_SIZE)
+const tileKey     = (kx, kz) => (kx + TILE_BIAS) * 1024 + (kz + TILE_BIAS);
+const ORIGIN_TILE = tileKey(0, 0);
+
+/**
+ * Add the tile under world point (x, z) to `set`, plus any neighbour tile
+ * within `margin` world units — geometry around the point spills that far.
+ */
+function addTiles(set, x, z, margin) {
+  const kx = Math.floor((x + HALF) / SIZE);
+  const kz = Math.floor((z + HALF) / SIZE);
+  const fx = x + HALF - kx * SIZE;
+  const fz = z + HALF - kz * SIZE;
+  const x0 = fx < margin ? kx - 1 : kx, x1 = fx > SIZE - margin ? kx + 1 : kx;
+  const z0 = fz < margin ? kz - 1 : kz, z1 = fz > SIZE - margin ? kz + 1 : kz;
+  for (let a = x0; a <= x1; a++) {
+    for (let b = z0; b <= z1; b++) set.add(tileKey(a, b));
+  }
+}
+
+// Soft glow strip for the portal edges: opaque at the wall, fading inward.
+// CanvasTexture flips Y, so canvas row 0 lands at v = 1 (the plane's +Y side).
+function makePortalTexture() {
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.45)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 4, 64);
+  return new THREE.CanvasTexture(c);
 }
 
 // ─── Procedural snake textures ────────────────────────────────────────────────
@@ -128,9 +178,12 @@ function makeSnakeHeadTexture() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, levelIndex, stateRef }) {
+export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, levelIndex, stateRef, wrap = false }) {
   const canvasRef = useRef(null);
   const color     = getLevel(Math.max(levelIndex ?? 0, 0)).color;
+
+  // Mirror of the wrap prop for the rAF loop (mode only changes between runs).
+  const wrapRef = useRef(wrap);
 
   // Handles onto the mutable parts of the scene, populated by the mount effect.
   // The theme effect below recolors these in place rather than rebuilding the
@@ -228,6 +281,32 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     obstacleMesh.frustumCulled = false;
     scene.add(obstacleMesh);
 
+    // ── Portal edges (wrap mode) ──────────────────────────────────────────────
+    // One glow strip per edge: the strip is authored for the top (−Z) edge and
+    // turned into place about Y, so a square board is assumed (as SIZE already
+    // does). Additive + no depth write keeps it a pure light overlay.
+    const GLOW_W    = CELL * 0.6;
+    const portalMat = new THREE.MeshBasicMaterial({
+      map: makePortalTexture(),
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const portalGeo = new THREE.PlaneGeometry(SIZE, GLOW_W);
+    const portal    = new THREE.Group();
+    for (let k = 0; k < 4; k++) {
+      const side  = new THREE.Group();
+      side.rotation.y = k * Math.PI / 2;
+      const strip = new THREE.Mesh(portalGeo, portalMat);
+      strip.rotation.x = -Math.PI / 2;               // lie flat; plane +Y → world −Z (the wall)
+      strip.position.set(0, 0.6, -HALF + GLOW_W / 2); // just above the grid lines
+      side.add(strip);
+      portal.add(side);
+    }
+    portal.visible = wrapRef.current;
+    scene.add(portal);
+
     // ── Snake dimensions / materials ──────────────────────────────────────────
     const BODY_R   = CELL * 0.34;   // max tube radius (neck)
     const HEAD_R   = CELL * 0.44;
@@ -288,6 +367,26 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     bodyMesh.castShadow = true;
     scene.add(bodyMesh);
 
+    // Wrap-mode copies of the body, one per extra tile the path touches; they
+    // share the tube's buffers, so a copy costs one draw call and no upload.
+    // Grown on demand, never shrunk. frustumCulled is off because the tube's
+    // bounding sphere is never recomputed and would be stale once shifted.
+    const bodyGhosts = [];
+    const ghostBody  = (i) => {
+      if (!bodyGhosts[i]) {
+        const m = new THREE.Mesh(bodyGeom, bodyMat);
+        m.castShadow    = true;
+        m.frustumCulled = false;
+        scene.add(m);
+        bodyGhosts[i] = m;
+      }
+      return bodyGhosts[i];
+    };
+    const bodyTiles   = new Set();
+    const headTiles   = new Set();
+    const BODY_MARGIN = BODY_R + A_MAX + 2;   // tube radius + slither + spline slack
+    const HEAD_MARGIN = CELL;                 // snout + extended tongue
+
     // Spline through segment centers + reusable scratch buffers (zero per-frame GC)
     const centerline  = Array.from({ length: POOL_SIZE }, () => new THREE.Vector3());
     const curvePoints = [];
@@ -334,7 +433,18 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       tongue.add(prong);
     }
     tongue.position.set(0, HEAD_R * 0.05, -HEAD_R * 1.15);
+    tongue.name = 'tongue';
     headMesh.add(tongue);
+
+    // Wrap-mode copies of the head. The head spans at most two tiles per axis
+    // and one of them is always the board, so three copies cover a corner.
+    const headGhosts = [];
+    for (let i = 0; i < 3; i++) {
+      const mesh = headMesh.clone();   // shares geometry + materials
+      mesh.visible = false;
+      scene.add(mesh);
+      headGhosts.push({ mesh, tongue: mesh.getObjectByName('tongue') });
+    }
 
     // ── Mine mesh (food) ──────────────────────────────────────────────────────
     const MINE_R = CELL * 0.35;
@@ -449,6 +559,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     sceneRef.current = {
       scene, groundMat, gridMat, ambient, sun, fill,
       mineMat, obstacleMat, obstacleMesh, obstacleHeight: OB_H,
+      portal, portalMat,
     };
 
     // ── rAF loop ──────────────────────────────────────────────────────────────
@@ -463,6 +574,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       const headIdx  = headIdxRef.current;
       const snakeLen = snakeLenRef.current;
       const state    = stateRef.current;
+      const wrap     = wrapRef.current;
 
       // Advance slither phase only while actively moving (freeze when idle/paused/dead)
       const dt = anim.lastFrameMs === null ? 16 : now - anim.lastFrameMs;
@@ -482,9 +594,11 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       }
       const t    = Math.min(1, (now - anim.startMs) / anim.interpDuration);
       const tE   = t * t * (3 - 2 * t); // smoothstep ease-in/out
-      const dxR  = head.x - anim.prevCell.x;
-      const dyR  = head.y - anim.prevCell.y;
+      let dxR    = head.x - anim.prevCell.x;
+      let dyR    = head.y - anim.prevCell.y;
+      if (wrap) { dxR = wrapDelta(dxR, COLS); dyR = wrapDelta(dyR, ROWS); }
       const skip = Math.abs(dxR) > 1 || Math.abs(dyR) > 1;
+      // In wrap mode hxF/hyF may run up to one cell off the board mid-step.
       const hxF  = skip ? head.x : anim.prevCell.x + dxR * tE;
       const hyF  = skip ? head.y : anim.prevCell.y + dyR * tE;
 
@@ -533,19 +647,29 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       }
 
       // ── Build snake centerline (head → tail), interpolated ──────────────────
+      // In wrap mode the chain is unwrapped: each point is shifted by whole
+      // boards to sit next to its predecessor (ux/uz), so the path stays
+      // continuous across edges.
       centerline[0].set(worldX(hxF), CENTER_Y, worldZ(hyF));
+      let ux = hxF, uz = hyF;
       for (let i = 1; i < snakeLen; i++) {
         const seg = segPool[(headIdx + i) % POOL_SIZE];
         let sxF = seg.x, szF = seg.y;
         if (i < snakeLen - 1) {
           // Ring slot i+1 held this segment's position before the latest tick.
           const prev = segPool[(headIdx + i + 1) % POOL_SIZE];
-          const sdx  = seg.x - prev.x;
-          const sdz  = seg.y - prev.y;
+          let sdx    = seg.x - prev.x;
+          let sdz    = seg.y - prev.y;
+          if (wrap) { sdx = wrapDelta(sdx, COLS); sdz = wrapDelta(sdz, ROWS); }
           if (Math.abs(sdx) <= 1 && Math.abs(sdz) <= 1) {
             sxF = prev.x + sdx * tE;
             szF = prev.y + sdz * tE;
           }
+        }
+        if (wrap) {
+          sxF += COLS * Math.round((ux - sxF) / COLS);
+          szF += ROWS * Math.round((uz - szF) / ROWS);
+          ux = sxF; uz = szF;
         }
         centerline[i].set(worldX(sxF), CENTER_Y, worldZ(szF));
       }
@@ -561,6 +685,25 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       } else {
         bodyMesh.visible = false;
       }
+
+      // Body copies: tile (kx,kz) of the unwrapped path is shown on the board by
+      // shifting it back by (−kx, −kz) boards. bodyMesh itself covers tile (0,0).
+      let ghostsUsed = 0;
+      if (wrap && snakeLen >= 2) {
+        bodyTiles.clear();
+        for (let i = 0; i < snakeLen; i++) {
+          addTiles(bodyTiles, centerline[i].x, centerline[i].z, BODY_MARGIN);
+        }
+        for (const key of bodyTiles) {
+          if (key === ORIGIN_TILE) continue;
+          const kx = Math.floor(key / 1024) - TILE_BIAS;
+          const kz = (key % 1024) - TILE_BIAS;
+          const m  = ghostBody(ghostsUsed++);
+          m.position.set(-kx * SIZE, 0, -kz * SIZE);
+          m.visible = true;
+        }
+      }
+      for (let i = ghostsUsed; i < bodyGhosts.length; i++) bodyGhosts[i].visible = false;
 
       // ── Head placement + orientation ────────────────────────────────────────
       const hwp = cellToWorld(hxF, hyF, HEAD_Y);
@@ -583,6 +726,27 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       const flickPhase = (anim.slitherT % 1600) / 1600;
       const flicking   = state === 'running' && flickPhase < 0.11;
       tongue.visible   = flicking;
+
+      // Head copies — same tile scheme as the body, around the head only.
+      let headsUsed = 0;
+      if (wrap) {
+        headTiles.clear();
+        addTiles(headTiles, hwp.x, hwp.z, HEAD_MARGIN);
+        for (const key of headTiles) {
+          if (key === ORIGIN_TILE || headsUsed >= headGhosts.length) continue;
+          const kx = Math.floor(key / 1024) - TILE_BIAS;
+          const kz = (key % 1024) - TILE_BIAS;
+          const g  = headGhosts[headsUsed++];
+          g.mesh.position.set(hwp.x - kx * SIZE, hwp.y, hwp.z - kz * SIZE);
+          g.mesh.rotation.y = headMesh.rotation.y;
+          g.tongue.visible  = flicking;
+          g.mesh.visible    = true;
+        }
+      }
+      for (let i = headsUsed; i < headGhosts.length; i++) headGhosts[i].mesh.visible = false;
+
+      // Portal glow pulse
+      if (portal.visible) portalMat.opacity = 0.55 + 0.25 * Math.sin(now * 0.004);
 
       // ── Mine (food) ────────────────────────────────────────────────────────
       const mwp = cellToWorld(food.x, food.y, MINE_Y);
@@ -623,8 +787,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       // Release all GPU resources. renderer.dispose() alone does NOT free
       // geometries, materials, or textures — walk the scene and dispose them
       // explicitly to avoid a GPU-memory leak on unmount / StrictMode remount.
-      // (bodyGeom and the two CanvasTextures are reached here via bodyMesh and
-      // material.map, so no separate disposal is needed.)
+      // (bodyGeom and the CanvasTextures are reached here via bodyMesh and
+      // material.map, so no separate disposal is needed. Resources shared by the
+      // wrap-mode copies are disposed more than once, which three.js tolerates.)
       scene.traverse((obj) => {
         obj.geometry?.dispose();
         const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -640,6 +805,13 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Wrap mode ───────────────────────────────────────────────────────────────
+  // Declared after the mount effect so sceneRef is populated on first run.
+  useEffect(() => {
+    wrapRef.current = wrap;
+    if (sceneRef.current) sceneRef.current.portal.visible = wrap;
+  }, [wrap]);
+
   // ── Per-level theme + obstacle layout ───────────────────────────────────────
   // Runs on mount (after the effect above, which is declared first) and on every
   // level change. Mutates materials and lights in place; the scene graph itself
@@ -648,7 +820,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     const s = sceneRef.current;
     if (!s) return;
 
-    const { theme } = getLevel(Math.max(levelIndex ?? 0, 0));
+    const level     = getLevel(Math.max(levelIndex ?? 0, 0));
+    const { theme } = level;
     s.scene.background.set(theme.bg);
     s.groundMat.color.set(theme.ground);
     s.gridMat.color.set(theme.grid);
@@ -657,6 +830,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     s.fill.color.set(theme.fill);
     s.mineMat.color.set(theme.food);
     s.obstacleMat.color.set(theme.obstacle);
+    s.portalMat.color.set(level.color);
 
     // Obstacles come from the engine's ref, not from getLevel(): useSnake drops
     // any generated cell that would land on the snake, the food, or directly

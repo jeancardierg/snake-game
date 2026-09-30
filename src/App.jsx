@@ -11,7 +11,7 @@
  *   <canvas-wrap>
  *     <GameCanvas> the game board
  *     <Overlay>    idle / paused / dead screens (absolute, over the canvas)
- *   controls-hint  keyboard shortcuts + Pause and Reset buttons
+ *   controls-hint  keyboard shortcuts + Pause, Reset, Music and mode buttons
  *
  * Touch controls: swipe on the canvas in any direction.
  * touchAction:'none' prevents the browser from scrolling while swiping.
@@ -29,7 +29,10 @@ import './index.css';
 
 export default function App() {
   // All game state and actions come from a single hook
-  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, applyDir, pause, reset } = useSnake();
+  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, wrap, applyDir, pause, reset, toggleWrap } = useSnake();
+
+  // Mode can only change between runs — useSnake ignores the toggle otherwise.
+  const runActive = state === 'running' || state === 'paused';
 
   // Ref mirror of state so GameCanvas's rAF loop can read it without a React
   // re-render. Updated synchronously after each render via useEffect.
@@ -102,6 +105,7 @@ export default function App() {
           obstaclesRef={obstaclesRef}
           levelIndex={levelIndex}
           stateRef={stateRef}
+          wrap={wrap}
         />
         <Overlay
           state={state}
@@ -130,6 +134,16 @@ export default function App() {
           aria-label={musicOn ? 'Mute music' : 'Unmute music'}
         >
           {musicOn ? '🔊 Music' : '🔇 Music'}
+        </button>
+        <button
+          className="ctrl-btn"
+          onClick={toggleWrap}
+          disabled={runActive}
+          aria-pressed={wrap}
+          aria-label={wrap ? 'Switch to classic walls' : 'Switch to wrap-around walls'}
+          title={runActive ? 'Mode can be changed before a run or after game over' : undefined}
+        >
+          {wrap ? '🌀 Wrap' : '🧱 Walls'}
         </button>
       </div>
     </div>

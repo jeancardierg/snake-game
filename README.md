@@ -46,6 +46,7 @@ Classic Snake game with endless procedurally generated levels — each with its 
 | Pause / Resume | `P` | Pause button | Pause button |
 | Restart (after death) | `Enter` or `Space` | Play Again button | Play Again button |
 | Mute / Unmute music | — | 🔊 Music button | 🔊 Music button |
+| Walls / Wrap mode (before a run or after game over) | — | 🧱 Walls / 🌀 Wrap button | 🧱 Walls / 🌀 Wrap button |
 
 The snake starts moving as soon as you press a direction key, swipe, or tap a D-Pad button.
 
@@ -64,7 +65,8 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 - **Automatic level-up** based on score thresholds derived from a foods-per-level quota
 - **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
 - **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
-- **Best score** saved in `localStorage` across sessions
+- **Wrap-around mode** — optional: the board edges become portals, so the snake leaves one edge and re-enters from the opposite one instead of dying. Toggled with the 🧱 Walls / 🌀 Wrap button before a run or after game over (locked mid-run), persisted in `localStorage`; the edges glow in the level's accent color and the body renders sliding continuously through the portal. Classic walls are the default
+- **Best score** saved in `localStorage` across sessions, tracked separately for classic and wrap mode
 - **High-DPI aware** — WebGL pixel ratio is set to `devicePixelRatio`; the drawing buffer is a fixed 200-unit board scaled to fit the container, so it's sharpest on high-DPI / mobile screens
 - **Input queue** — up to 2 direction changes buffered at a time (one is consumed per tick), so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
@@ -126,22 +128,23 @@ App.jsx
   │     ├── foodRef       ← current food {x, y}
   │     ├── obstaclesRef  ← current level's walls: {set, cells}
   │     ├── score         ← current score
-  │     ├── best          ← all-time best (localStorage)
+  │     ├── best          ← all-time best for the current mode (localStorage)
+  │     ├── wrap          ← wrap-around mode on/off (localStorage)
   │     ├── levelIndex    ← current level (unbounded — see levels.js)
   │     ├── banner        ← transient level-up announcement, or null
   │     └── state         ← 'idle' | 'running' | 'paused' | 'dead'
   │
   ├── <Scoreboard>        ← reads: score, best, levelIndex, state
   ├── <LevelBar>          ← reads: score, levelIndex
-  ├── <GameCanvas>        ← reads refs: headIdxRef, snakeLenRef, foodRef, obstaclesRef (+ levelIndex, stateRef) → renders via WebGL
+  ├── <GameCanvas>        ← reads refs: headIdxRef, snakeLenRef, foodRef, obstaclesRef (+ levelIndex, stateRef, wrap) → renders via WebGL
   ├── <DPad>              ← calls: applyDir
   ├── <Overlay>           ← reads: state, score, levelIndex, banner
-  └── controls-hint       ← Pause / Reset buttons + music mute toggle (music.js)
+  └── controls-hint       ← Pause / Reset buttons + music mute toggle (music.js) + mode toggle (calls toggleWrap)
 ```
 
 Level data is not part of that flow: `getLevel(n)` in `levels.js` is a pure, memoized function, so every component derives speed, theme, identifier and music from `levelIndex` on its own rather than threading a level object through props.
 
-**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, D-Pad buttons) call the three action functions exported by the hook: `applyDir`, `pause`, `reset`.
+**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, D-Pad buttons) call the action functions exported by the hook: `applyDir`, `pause`, `reset`, `toggleWrap`.
 
 **Why refs alongside state?**
 The game loop runs inside a `setInterval`. Because closures capture variables at creation time, a plain `useState` value inside the interval would always read its initial value (stale closure). Every piece of game state that the tick function needs to read or write is mirrored in a `useRef` so it's always current. React state is updated in parallel so the UI re-renders.
@@ -310,7 +313,8 @@ threw without Web Audio would break the whole suite.
 | `snakeLenRef` | `number` | Current live segment count |
 | `foodRef` | `{x,y}` | Current food cell (the mine) |
 | `score` / `scoreRef` | `number` | Current score (10 pts per food) |
-| `best` / `bestRef` | `number` | All-time best, persisted in `localStorage` |
+| `best` / `bestRef` | `number` | All-time best for the current mode, persisted in `localStorage` (`snakeBest` classic, `snakeBestWrap` wrap) |
+| `wrap` / `wrapRef` | `boolean` | Wrap-around mode, persisted in `localStorage` under `snakeWrap`; changed only via `toggleWrap()` while idle or dead |
 | `levelIndex` / `levelRef` | `number` | Current level index (unbounded — see `levels.js`) |
 | `obstaclesRef` | `{set, cells}` | Current level's wall cells: a `Set` of `x*ROWS+y` keys for O(1) collision checks, plus the matching cell list for `GameCanvas` |
 | `banner` | `object \| null` | Transient level-up announcement, cleared by a timer |
@@ -334,7 +338,7 @@ threw without Web Audio would break the whole suite.
            │           paused         │
            └──────────────────────────┘
                           │
-                wall / obstacle / self hit
+       wall (classic) / obstacle / self hit
                           │
                           ▼
                         dead
@@ -352,7 +356,7 @@ Called by `setInterval` every N milliseconds. Collision checks all run **before*
 head is written into the ring buffer, so a fatal move never mutates `segPool`.
 1. Dequeues the next direction (rejects 180° reversals).
 2. Computes the candidate head position (`head + dir`).
-3. Wall collision → `die()`.
+3. Board edge: in wrap mode the position is wrapped onto the opposite edge (`(hx + COLS) % COLS`, same for rows); in classic mode leaving the board → `die()`.
 4. Obstacle collision (`obstaclesRef.current.set` lookup) → `die()` — a generated wall is as fatal as the board edge.
 5. Self collision → `die()`. Index 0 is skipped (the old head cell can never equal the new one), and when the snake is **not** eating the tail is skipped too: it vacates its cell on this same tick, so moving into it is legal (canonical Snake). When eating, the tail stays put and the full body is checked.
 6. Commits the head via `poolPrepend` and increments `snakeLenRef`.
@@ -437,6 +441,7 @@ The snake body is **one continuous tube**, not a chain of spheres:
 - **Head**: a scaled `SphereGeometry` wedge (slim, elongated, `−Z` = forward) with two eyes (gold sphere + black pupil) and a **forked tongue** that flicks periodically while running — all parented to the head so they move and rotate with it.
 - **Head direction**: `headMesh.rotation.y = atan2(−ndx, −ndz)` from the head→neck vector each frame (the snout faces `−Z`).
 - **Head interpolation**: measures the real tick interval, sets `interpDuration = measured × 0.92` (clamped 40–400 ms), and smoothstep-interpolates the head between grid cells each rAF frame for fluid movement.
+- **Wrap mode**: grid deltas are normalised to the shortest way round the board (`wrapDelta`), and the centerline is **unwrapped** — each point is shifted by whole boards to sit next to its predecessor, so the path stays continuous off the board edge. The tube is built once along that path; for every other board-sized tile the path touches, a copy mesh sharing the tube's buffers is drawn shifted back onto the board (three head clones do the same for the head). The orthographic frustum is exactly the board, so the off-board part of every copy is cut away for free — no clipping planes. Four additive glow strips mark the portal edges, tinted with the level's accent color and pulsing while visible.
 
 #### Food rendering
 
@@ -589,7 +594,8 @@ tick()
  │
  ├─ candidate head = (head.x + dir.x, head.y + dir.y)     ← not committed yet
  │
- ├─ Wall check:     hx < 0 or >= COLS, hy < 0 or >= ROWS  → die()
+ ├─ Edge:           wrap mode  → hx = (hx+COLS)%COLS, hy = (hy+ROWS)%ROWS
+ │                  classic    → hx < 0 or >= COLS, hy < 0 or >= ROWS → die()
  │
  ├─ Obstacle check: obstaclesRef.set.has(hx * ROWS + hy)  → die()
  │
@@ -646,7 +652,7 @@ Handles the edge case of skipping multiple levels in one eat. The loop has no up
 
 Level-up restarts the interval at the new base speed, resets `foodsThisLevel`, installs the new obstacle layout, starts the new track, and shows the level banner. Obstacles are installed **before** the replacement food is placed, or food could spawn inside a freshly added wall.
 
-**Mid-run layout swap.** The new layout lands on a board that is already in play, so `spawnExclusions()` drops any generated cell that is currently occupied by the snake, holds the current food, or lies in the two cells directly ahead of the head. Without that last exclusion a level-up could drop a wall into the snake's face — an unavoidable death.
+**Mid-run layout swap.** The new layout lands on a board that is already in play, so `spawnExclusions()` drops any generated cell that is currently occupied by the snake, holds the current food, or lies in the two cells directly ahead of the head. Without that last exclusion a level-up could drop a wall into the snake's face — an unavoidable death. In wrap mode the look-ahead wraps with the head, so a wall can't land just past the portal either.
 
 ---
 

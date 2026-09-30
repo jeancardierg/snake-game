@@ -11,13 +11,16 @@
  *   foodRef      React.MutableRefObject<{x,y}>   — current food position (for GameCanvas)
  *   obstaclesRef React.MutableRefObject<{set,cells}> — current level's walls (for GameCanvas)
  *   score       number    — current score
- *   best        number    — all-time best (persisted in localStorage)
+ *   best        number    — all-time best for the current mode (persisted in localStorage)
  *   levelIndex  number    — current level index (unbounded; see levels.js)
  *   state       string    — 'idle' | 'running' | 'paused' | 'dead'
  *   banner      object    — transient level-up announcement, or null
+ *   wrap        boolean   — wrap-around mode: the head leaves one edge and
+ *                           re-enters from the opposite one instead of dying
  *   applyDir    function  — queue a new direction ({x,y})
  *   pause       function  — toggle pause/resume
  *   reset       function  — restart the game from scratch
+ *   toggleWrap  function  — flip wrap mode (no-op unless idle or dead)
  *
  * Rendering decoupling:
  *   snake and food are no longer returned as React state. Instead, headIdxRef,
@@ -43,29 +46,43 @@ const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 // reset() re-seeds on every game restart.
 initPool(INIT_SNAKE);
 
+// ─── Mode persistence ─────────────────────────────────────────────────────────
+// Best scores are tracked per mode: wrap-around is easier than classic, so a
+// shared record would be unfair. Classic keeps the original key so existing
+// records survive the upgrade.
+const WRAP_KEY = 'snakeWrap';
+function bestKey(wrap) { return wrap ? 'snakeBestWrap' : 'snakeBest'; }
+
+/** Read the persisted mode. Classic (false) unless wrap was explicitly chosen. */
+function readWrap() {
+  try {
+    return localStorage.getItem(WRAP_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Read the persisted best score from localStorage.
- * Called once at module load — result shared by both useState and useRef
- * initialisers so the two values are guaranteed to be identical.
+ * Read the persisted best score for one mode from localStorage.
  * Logs a warning (never throws) when storage is unavailable.
  */
-function readBestScore() {
+function readBestScore(key) {
   try {
     // Validate the parsed value. A corrupt/non-numeric stored value must not
     // poison `best` with NaN: it would render as "NaN" and, because
     // `newScore > NaN` is always false, permanently block best-score updates
     // for the session. Reject anything that isn't a finite, non-negative number.
-    const n = parseInt(localStorage.getItem('snakeBest'), 10);
+    const n = parseInt(localStorage.getItem(key), 10);
     return Number.isFinite(n) && n >= 0 ? n : 0;
   } catch (e) {
     console.warn('[useSnake] localStorage unavailable:', e.message);
     return 0;
   }
 }
-// Note: INIT_BEST intentionally NOT computed here at module load.
-// useState(readBestScore) uses the function as a lazy initializer so it runs
-// on the hook's first render — this ensures localStorage is read fresh for
-// each hook instance (critical for test isolation and React Strict Mode).
+// Note: best score and mode are intentionally NOT read here at module load.
+// useState uses lazy initializers so they run on the hook's first render — this
+// ensures localStorage is read fresh for each hook instance (critical for test
+// isolation and React Strict Mode).
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -149,10 +166,12 @@ export const LOOKAHEAD = 2;
  *   - the LOOKAHEAD cells directly ahead of the head (an unavoidable death)
  *
  * Off-board look-ahead cells produce keys no obstacle can match, so no bounds
- * check is needed. Exported for tests — the fairness of a mid-run layout swap
- * rests entirely on this set.
+ * check is needed in classic mode. In wrap mode the head continues onto the
+ * opposite edge, so the look-ahead wraps with it — otherwise a wall could drop
+ * directly behind the portal. Exported for tests — the fairness of a mid-run
+ * layout swap rests entirely on this set.
  */
-export function spawnExclusions(headIdx, snakeLen, dir, food) {
+export function spawnExclusions(headIdx, snakeLen, dir, food, wrap = false) {
   const excluded = new Set();
 
   for (let i = 0; i < snakeLen; i++) {
@@ -162,7 +181,13 @@ export function spawnExclusions(headIdx, snakeLen, dir, food) {
 
   const head = poolGet(headIdx, 0);
   for (let k = 1; k <= LOOKAHEAD; k++) {
-    excluded.add((head.x + dir.x * k) * ROWS + (head.y + dir.y * k));
+    let x = head.x + dir.x * k;
+    let y = head.y + dir.y * k;
+    if (wrap) {
+      x = ((x % COLS) + COLS) % COLS;
+      y = ((y % ROWS) + ROWS) % ROWS;
+    }
+    excluded.add(x * ROWS + y);
   }
 
   if (food) excluded.add(food.x * ROWS + food.y);
@@ -176,7 +201,8 @@ export function useSnake() {
   // ── React state (drives non-canvas UI re-renders) ───────────────────────────
   // snake and food are intentionally NOT state — GameCanvas reads refs directly.
   const [score, setScore]       = useState(0);
-  const [best, setBest]         = useState(readBestScore);
+  const [wrap, setWrap]         = useState(readWrap);
+  const [best, setBest]         = useState(() => readBestScore(bestKey(wrap)));
   const [levelIndex, setLevel]  = useState(START_LEVEL);
   const [state, setState]       = useState('idle');
   // Transient level-up announcement. Owned here rather than derived in App from
@@ -197,6 +223,7 @@ export function useSnake() {
   const foodRef     = useRef({ x: 7, y: 5 });
   const scoreRef    = useRef(0);
   const bestRef     = useRef(best);
+  const wrapRef     = useRef(wrap);
   const levelRef    = useRef(START_LEVEL);
   const intervalRef       = useRef(null);
   const stateRef          = useRef('idle');
@@ -234,6 +261,7 @@ export function useSnake() {
   const applyLevelObstacles = useCallback((lvl) => {
     obstaclesRef.current = buildObstacles(lvl, spawnExclusions(
       headIdxRef.current, snakeLenRef.current, dirRef.current, foodRef.current,
+      wrapRef.current,
     ));
   }, []);
 
@@ -274,8 +302,8 @@ export function useSnake() {
    *
    * Steps:
    *  1. Consume the next queued direction (reject 180° reversals).
-   *  2. Compute new head position.
-   *  3. Collision checks (wall, self) → die().
+   *  2. Compute new head position (wrapped onto the opposite edge in wrap mode).
+   *  3. Collision checks (wall — classic mode only, obstacle, self) → die().
    *  4. Prepend new head into ring buffer (in-place, zero allocation).
    *  5. Food check:
    *     - YES: score, best, level-up, new food  (tail kept → grows)
@@ -294,11 +322,16 @@ export function useSnake() {
 
     // 2. New head = current head + direction vector
     const curHead = poolGet(headIdxRef.current, 0);
-    const hx = curHead.x + dirRef.current.x;
-    const hy = curHead.y + dirRef.current.y;
+    let hx = curHead.x + dirRef.current.x;
+    let hy = curHead.y + dirRef.current.y;
 
-    // 3a. Wall collision
-    if (hx < 0 || hx >= COLS || hy < 0 || hy >= ROWS) {
+    // 3a. Board edge: wrap mode teleports to the opposite edge (a single step
+    // can overshoot by at most one cell, so +COLS/+ROWS keeps % non-negative);
+    // classic mode treats the edge as a wall.
+    if (wrapRef.current) {
+      hx = (hx + COLS) % COLS;
+      hy = (hy + ROWS) % ROWS;
+    } else if (hx < 0 || hx >= COLS || hy < 0 || hy >= ROWS) {
       return die();
     }
 
@@ -341,7 +374,7 @@ export function useSnake() {
       if (newScore > bestRef.current) {
         bestRef.current = newScore;
         setBest(newScore);
-        try { localStorage.setItem('snakeBest', String(newScore)); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
+        try { localStorage.setItem(bestKey(wrapRef.current), String(newScore)); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
       }
 
       // Per-food speed boost: each food reduces the tick interval within the level
@@ -447,6 +480,25 @@ export function useSnake() {
     }
   }, [startLoop, stopLoop]);
 
+  /**
+   * Flip between classic and wrap-around mode.
+   *
+   * Locked while a run is in progress (running or paused): switching to wrap
+   * mid-run would let the player dodge an imminent wall death, and the run's
+   * score would be recorded against the wrong mode's best.
+   */
+  const toggleWrap = useCallback(() => {
+    if (stateRef.current !== 'idle' && stateRef.current !== 'dead') return;
+    const next = !wrapRef.current;
+    wrapRef.current = next;
+    setWrap(next);
+    try { localStorage.setItem(WRAP_KEY, next ? '1' : '0'); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
+    // Best score is per mode — show the record for the mode about to be played.
+    const nextBest = readBestScore(bestKey(next));
+    bestRef.current = nextBest;
+    setBest(nextBest);
+  }, []);
+
   const reset = useCallback(() => {
     stopLoop();
     stopMusic();
@@ -539,8 +591,8 @@ export function useSnake() {
     // Refs for GameCanvas (read directly, no React round-trip)
     headIdxRef, snakeLenRef, foodRef, obstaclesRef,
     // React state for non-canvas UI
-    score, best, levelIndex, state, banner,
+    score, best, levelIndex, state, banner, wrap,
     // Actions
-    applyDir, pause, reset,
+    applyDir, pause, reset, toggleWrap,
   };
 }

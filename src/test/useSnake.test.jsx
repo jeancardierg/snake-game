@@ -2,7 +2,8 @@
  * Integration tests for the useSnake hook.
  *
  * Covers the state machine, tick loop, direction queue, level progression,
- * localStorage persistence, and visibility-change auto-pause/resume.
+ * localStorage persistence, wrap-around mode, and visibility-change
+ * auto-pause/resume.
  *
  * Uses @testing-library/react's renderHook + act so the hook runs in a
  * realistic React environment with proper batching and effect flushing.
@@ -295,6 +296,17 @@ describe('spawnExclusions', () => {
     initPool([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }]);
     expect(() => spawnExclusions(0, 3, DIR.LEFT, null)).not.toThrow();
   });
+
+  it('wraps the look-ahead onto the opposite edge in wrap mode', () => {
+    initPool([{ x: 9, y: 5 }, { x: 8, y: 5 }, { x: 7, y: 5 }]);
+    const classic = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD);
+    const wrapped = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD, true);
+    for (let k = 1; k <= LOOKAHEAD; k++) {
+      const key = (k - 1) * ROWS + 5;   // (0,5), (1,5): just past the right edge
+      expect(classic.has(key)).toBe(false);
+      expect(wrapped.has(key)).toBe(true);
+    }
+  });
 });
 
 describe('buildObstacles', () => {
@@ -391,6 +403,93 @@ describe('obstacles', () => {
   it('starts with an empty layout on level 0', () => {
     const { result } = renderHook(() => useSnake());
     expect(result.current.obstaclesRef.current.cells).toEqual([]);
+  });
+});
+
+// ─── Wrap-around mode ─────────────────────────────────────────────────────────
+
+describe('wrap mode', () => {
+  const headOf = (result) => segPool[result.current.headIdxRef.current % POOL_SIZE];
+
+  it('defaults to classic walls', () => {
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.wrap).toBe(false);
+  });
+
+  it('restores the persisted mode on mount', () => {
+    localStorage.setItem('snakeWrap', '1');
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.wrap).toBe(true);
+  });
+
+  it('toggles from idle and persists the choice', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleWrap());
+    expect(result.current.wrap).toBe(true);
+    expect(localStorage.getItem('snakeWrap')).toBe('1');
+    act(() => result.current.toggleWrap());
+    expect(result.current.wrap).toBe(false);
+    expect(localStorage.getItem('snakeWrap')).toBe('0');
+  });
+
+  it('exits the top edge and re-enters at the bottom', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleWrap());
+    act(() => result.current.applyDir(DIR.UP));
+    for (let i = 0; i < 6; i++) tick();   // y: 5 → 0, then across the edge
+    expect(result.current.state).toBe('running');
+    expect(headOf(result)).toMatchObject({ x: 5, y: ROWS - 1 });
+  });
+
+  it('exits the right edge and re-enters at the left', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => { result.current.foodRef.current = { x: 0, y: 0 }; });  // off the path
+    act(() => result.current.toggleWrap());
+    act(() => result.current.applyDir(DIR.RIGHT));   // starts the run (already heading right)
+    for (let i = 0; i < 5; i++) tick();   // x: 5 → 9, then across the edge
+    expect(result.current.state).toBe('running');
+    expect(headOf(result)).toMatchObject({ x: 0, y: 5 });
+  });
+
+  it('is locked while a run is in progress', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));
+    act(() => result.current.toggleWrap());
+    expect(result.current.wrap).toBe(false);
+    act(() => result.current.pause());
+    act(() => result.current.toggleWrap());
+    expect(result.current.wrap).toBe(false);
+  });
+
+  it('can be toggled after game over', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));
+    act(() => { vi.advanceTimersByTime(getLevel(0).speed * 8); });
+    expect(result.current.state).toBe('dead');
+    act(() => result.current.toggleWrap());
+    expect(result.current.wrap).toBe(true);
+  });
+
+  it('tracks best score separately per mode', () => {
+    localStorage.setItem('snakeBest', '50');
+    localStorage.setItem('snakeBestWrap', '20');
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.best).toBe(50);
+    act(() => result.current.toggleWrap());
+    expect(result.current.best).toBe(20);
+    act(() => result.current.toggleWrap());
+    expect(result.current.best).toBe(50);
+  });
+
+  it('records a wrap-mode best under its own key only', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleWrap());
+    act(() => result.current.applyDir(DIR.UP));
+    placeFoodAhead(result);
+    tick();
+    expect(result.current.best).toBe(10);
+    expect(localStorage.getItem('snakeBestWrap')).toBe('10');
+    expect(localStorage.getItem('snakeBest')).toBeNull();
   });
 });
 

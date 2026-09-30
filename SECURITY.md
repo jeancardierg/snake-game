@@ -54,20 +54,28 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
   browser bundle — they run only on a developer machine or a CI runner. Advisories
   that surface under a plain `npm audit` but disappear under `--omit=dev` therefore
   cannot reach the deployed site. Fix them on their own merits, not as releng
-  emergencies. (The dev tree is clean as of the undici bump in #26; nothing enforces
-  that, so run `npm audit` to check rather than trusting this sentence.)
+  emergencies. (The dev tree was last cleaned in 2026-09 — undici, js-yaml,
+  brace-expansion, @humanfs/node and vitest/@vitest/mocker; nothing enforces that,
+  so run `npm audit` to check rather than trusting this sentence.)
 - There is no `.github/dependabot.yml` in this repo, so there are **no scheduled
   version-update PRs**. Dependency bumps arrive only from repository-level
   Dependabot *security* updates, which need no config file. Add a
   `.github/dependabot.yml` if routine version updates are wanted.
 - `package.json` forces two transitive versions through `overrides`: `undici`
-  (`^7.29.0`) and `@babel/core` (`^7.29.6`). Both are floors, not exact pins, so
-  patch and minor fixes still flow through.
+  (`^7.30.0`) and `@babel/core` (`^7.29.6`). Both are floors, not exact pins, so
+  patch and minor fixes still flow through. When an advisory is fixed in a newer
+  version, raise the floor to it so a re-resolve cannot land on a vulnerable one.
 - **Keep them as ranges.** `undici` was previously an exact pin at `7.28.0`, added to
   clear an advisory. Later advisories were patched in `7.29.0`, which the pin made
   unreachable — so the override became the reason the tree could not be fixed, and
   Dependabot's security-update run failed against it until #26 widened it to a caret
   range. An exact pin in `overrides` is a dependency that only a human can bump.
+- **Bump vitest with npm 11.** From 4.1.11, `vitest` and `@vitest/coverage-v8`
+  declare exact peer dependencies on each other. Moving the pair from 4.1.0 to 4.1.11
+  crashed npm 10.9's arborist (`Cannot read properties of null (reading 'edgesOut')`)
+  in `npm install`, `npm update` and `npm audit fix`; `npx npm@11 install` resolved it.
+  Installs against the committed lockfile (`npm ci`, or `npm install` with no version
+  change) work under npm 10, so CI and day-to-day installs are unaffected.
 
 ## Reporting
 

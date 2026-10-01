@@ -60,8 +60,11 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
   so run `npm audit` to check rather than trusting this sentence.)
 - `.github/dependabot.yml` opens **weekly version-update PRs** (Mondays) for npm and
   GitHub Actions. npm minor/patch bumps are grouped into one dev and one prod PR;
-  majors arrive as individual PRs. `vitest` and `@vitest/*` are always grouped
-  together because they pin each other as exact peers. Security updates still come
+  majors arrive as individual PRs. Packages that peer-pin each other are kept in
+  lockstep groups (`vitest` + `@vitest/*`, `eslint` + `@eslint/*`, `react` +
+  `react-dom`) and excluded from the dev/prod groups — otherwise Dependabot ranks the
+  dependency-type group as more specific and splits the pair into PRs that each fail
+  `npm ci` (this happened to vitest 5). Security updates still come
   from the repository-level Dependabot setting, independent of this schedule.
 - `package.json` forces two transitive versions through `overrides`: `undici`
   (`^7.30.0`) and `@babel/core` (`^7.29.6`). Both are floors, not exact pins, so

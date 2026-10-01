@@ -7,22 +7,41 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
-      # vitest and @vitest/* declare exact peer deps on each other; bumping
-      # them in separate PRs leaves the tree unresolvable.
+      # Lockstep groups: these packages peer-pin each other, so bumping one
+      # without the other fails `npm ci`. They must also be excluded from the
+      # dependency-type groups below — Dependabot ranks a dependency-type
+      # group as more specific than a pattern group and would otherwise pull
+      # them out (this split vitest 5 into two failing PRs).
       vitest:
         patterns:
           - vitest
           - "@vitest/*"
+      eslint:
+        patterns:
+          - eslint
+          - "@eslint/*"
+      react:
+        patterns:
+          - react
+          - react-dom
       dev-minor-patch:
         dependency-type: development
         update-types:
           - minor
           - patch
+        exclude-patterns:
+          - vitest
+          - "@vitest/*"
+          - eslint
+          - "@eslint/*"
       prod-minor-patch:
         dependency-type: production
         update-types:
           - minor
           - patch
+        exclude-patterns:
+          - react
+          - react-dom
 
   - package-ecosystem: github-actions
     directory: /

@@ -569,7 +569,7 @@ Prefixes all asset URLs so the app works at `https://jeancardierg.github.io/snak
 
 GitHub Actions workflow on push to `master`:
 
-1. Checkout + Node 20 setup with npm cache
+1. Checkout + Node 22 setup with npm cache
 2. `npm ci` — clean install from lockfile
 3. `npm run lint` — ESLint gate
 4. `npm test` — Vitest suite gate
@@ -668,8 +668,8 @@ Level-up restarts the interval at the new base speed, resets `foodsThisLevel`, i
 
 ## Running Locally
 
-**Requirements:** Node.js `^20.19.0 || >=22.12.0` and npm. (Vite 8 and jsdom 29 both
-refuse older runtimes — Node 18 will not build or test this project. CI runs Node 20.)
+**Requirements:** Node.js `^22.12.0 || >=24.0.0` and npm. (Vitest 5 requires it; Node 20
+is end-of-life and will not run the test suite. CI runs Node 22.)
 
 ```bash
 git clone https://github.com/jeancardierg/snake-game.git

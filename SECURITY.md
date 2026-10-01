@@ -57,10 +57,11 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
   emergencies. (The dev tree was last cleaned in 2026-09 — undici, js-yaml,
   brace-expansion, @humanfs/node and vitest/@vitest/mocker; nothing enforces that,
   so run `npm audit` to check rather than trusting this sentence.)
-- There is no `.github/dependabot.yml` in this repo, so there are **no scheduled
-  version-update PRs**. Dependency bumps arrive only from repository-level
-  Dependabot *security* updates, which need no config file. Add a
-  `.github/dependabot.yml` if routine version updates are wanted.
+- `.github/dependabot.yml` opens **weekly version-update PRs** (Mondays) for npm and
+  GitHub Actions. npm minor/patch bumps are grouped into one dev and one prod PR;
+  majors arrive as individual PRs. `vitest` and `@vitest/*` are always grouped
+  together because they pin each other as exact peers. Security updates still come
+  from the repository-level Dependabot setting, independent of this schedule.
 - `package.json` forces two transitive versions through `overrides`: `undici`
   (`^7.30.0`) and `@babel/core` (`^7.29.6`). Both are floors, not exact pins, so
   patch and minor fixes still flow through. When an advisory is fixed in a newer

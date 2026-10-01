@@ -49,7 +49,8 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
 - Production dependencies are audited in CI (`npm audit --omit=dev --audit-level=high`)
   and currently report **0 vulnerabilities**. That gate is the release blocker: it
   runs before `npm run build` in `.github/workflows/deploy.yml`, so a high or
-  critical production advisory fails the deploy.
+  critical production advisory fails the deploy. The same gate runs on every pull
+  request via `.github/workflows/ci.yml`.
 - Dev-only dependencies are **not** covered by that gate and are not shipped to the
   browser bundle — they run only on a developer machine or a CI runner. Advisories
   that surface under a plain `npm audit` but disappear under `--omit=dev` therefore

@@ -30,6 +30,7 @@ Classic Snake game with endless procedurally generated levels — each with its 
   - [main.jsx](#mainjsx)
   - [vite.config.js](#viteconfigjs)
   - [deploy.yml](#deployyml)
+  - [ci.yml](#ciyml)
 - [Game Logic Deep Dive](#game-logic-deep-dive)
 - [Running Locally](#running-locally)
 - [Deployment](#deployment)
@@ -83,7 +84,9 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 ```
 snake-game/                     # repo root (package name is "snake-react")
 ├── .github/
+│   ├── dependabot.yml          # Weekly npm + GitHub Actions version updates
 │   └── workflows/
+│       ├── ci.yml              # Lint/test/audit/build gate on every pull request
 │       └── deploy.yml          # Auto-deploy to GitHub Pages on push to master
 ├── public/
 │   └── favicon.svg             # Browser tab icon
@@ -577,6 +580,13 @@ GitHub Actions workflow on push to `master`:
 9. Deploy via OIDC authentication (`id-token: write`, no secrets required)
 
 `concurrency: cancel-in-progress: true` ensures only one deployment runs at a time.
+
+### `ci.yml`
+
+GitHub Actions workflow on every pull request (including Dependabot PRs). Runs steps 1–6
+of `deploy.yml` (install, lint, test, production audit, build) with a read-only token and
+no deployment, so a broken change is caught before it reaches `master`. A newer push to
+the same PR cancels the in-flight run.
 
 ---
 

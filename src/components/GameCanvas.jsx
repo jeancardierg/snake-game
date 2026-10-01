@@ -10,7 +10,7 @@
  *   - Mine food: dark metallic sphere with spike protrusions and blinking
  *     red detonator
  *   - Grass-green ground plane + grid lines
- *   - Directional sun + ambient + fill lights, PCFSoft shadow map
+ *   - Directional sun + ambient + fill lights, PCF shadow map
  *   - Point-light flash on eat, particle burst, camera shake on death
  *   - Wrap mode: pulsing portal glow on the board edges, and a snake that slides
  *     through one edge and out of the opposite one (see "Wrap rendering" below)
@@ -207,7 +207,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setSize(SIZE, SIZE, false);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type    = THREE.PCFShadowMap;  // PCFSoftShadowMap was removed in three r186
 
     // ── Scene ─────────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();

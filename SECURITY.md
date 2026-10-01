@@ -49,7 +49,8 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
 - Production dependencies are audited in CI (`npm audit --omit=dev --audit-level=high`)
   and currently report **0 vulnerabilities**. That gate is the release blocker: it
   runs before `npm run build` in `.github/workflows/deploy.yml`, so a high or
-  critical production advisory fails the deploy.
+  critical production advisory fails the deploy. The same gate runs on every pull
+  request via `.github/workflows/ci.yml`.
 - Dev-only dependencies are **not** covered by that gate and are not shipped to the
   browser bundle — they run only on a developer machine or a CI runner. Advisories
   that surface under a plain `npm audit` but disappear under `--omit=dev` therefore
@@ -57,10 +58,11 @@ can set headers, add `frame-ancestors 'none'` (or `X-Frame-Options: DENY`).
   emergencies. (The dev tree was last cleaned in 2026-09 — undici, js-yaml,
   brace-expansion, @humanfs/node and vitest/@vitest/mocker; nothing enforces that,
   so run `npm audit` to check rather than trusting this sentence.)
-- There is no `.github/dependabot.yml` in this repo, so there are **no scheduled
-  version-update PRs**. Dependency bumps arrive only from repository-level
-  Dependabot *security* updates, which need no config file. Add a
-  `.github/dependabot.yml` if routine version updates are wanted.
+- `.github/dependabot.yml` opens **weekly version-update PRs** (Mondays) for npm and
+  GitHub Actions. npm minor/patch bumps are grouped into one dev and one prod PR;
+  majors arrive as individual PRs. `vitest` and `@vitest/*` are always grouped
+  together because they pin each other as exact peers. Security updates still come
+  from the repository-level Dependabot setting, independent of this schedule.
 - `package.json` forces two transitive versions through `overrides`: `undici`
   (`^7.30.0`) and `@babel/core` (`^7.29.6`). Both are floors, not exact pins, so
   patch and minor fixes still flow through. When an advisory is fixed in a newer

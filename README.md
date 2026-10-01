@@ -415,7 +415,7 @@ a GPU-memory leak on remount / React Strict Mode.
 | `WebGLRenderer` | Targets the `<canvas>` element; `setPixelRatio(devicePixelRatio)`; fixed 200×200-unit drawing buffer, CSS-scaled to the container |
 | `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (100)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
 | `AmbientLight(0xfff6ec, 0.4)` | Warm-neutral base fill — prevents pure-shadow areas going black |
-| `DirectionalLight(0xfff4e0, 0.85)` | Sun from the upper-left; casts `PCFSoftShadowMap` shadows on the ground |
+| `DirectionalLight(0xfff4e0, 0.85)` | Sun from the upper-left; casts `PCFShadowMap` shadows on the ground |
 | `DirectionalLight(0x6688aa, 0.2)` | Cool fill from the lower-right for depth separation |
 | `PlaneGeometry(SIZE, SIZE)` | Ground plane, `receiveShadow = true`; recolored per level theme |
 | `LineSegments` | Grid cell borders at Y=0.5 |

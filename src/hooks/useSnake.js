@@ -143,21 +143,81 @@ const START_LEVEL = readStartLevel();
 // How long the level-up announcement stays on screen.
 const BANNER_MS = 1600;
 
-/** Build the {set, cells} obstacle record for a level, minus any excluded cells. */
+// Monotonic across the whole session, so a renderer comparing versions can never
+// mistake a new record (level-up, reset) for the one it already drew.
+let obstacleVersion = 0;
+
+/**
+ * Build the obstacle record for a level.
+ *
+ *   set     — keys (x*ROWS+y) of walls in play, for O(1) collision checks
+ *   cells   — the same walls as {x,y}, for GameCanvas
+ *   pending — layout cells that could not be placed yet because they were in
+ *             `excluded` (under the snake, on the food, right ahead of the head).
+ *             placePendingObstacles() drops them in once they are clear, so a
+ *             level-up mid-run no longer loses part of its layout for good.
+ *   version — bumped on every change; GameCanvas re-syncs when it differs
+ */
 export function buildObstacles(lvl, excluded) {
-  const set   = new Set();
-  const cells = [];
+  const set     = new Set();
+  const cells   = [];
+  const pending = [];
   for (const c of getLevel(lvl).obstacles) {
     const key = c.x * ROWS + c.y;
-    if (excluded?.has(key)) continue;
+    if (excluded?.has(key)) { pending.push(c); continue; }
     set.add(key);
     cells.push(c);
   }
-  return { set, cells };
+  return { set, cells, pending, version: ++obstacleVersion };
+}
+
+/**
+ * Move every pending obstacle cell that is now clear into play.
+ * Uses the same exclusion rules as a level-up, so a wall never appears under the
+ * snake, on the food, or inside the look-ahead in front of the head.
+ *
+ * Safe for reachability: the full layout was validated reachable from spawn,
+ * and any subset of it has strictly fewer walls.
+ *
+ * Mutates `record` in place. Returns true when anything was placed.
+ */
+export function placePendingObstacles(record, headIdx, snakeLen, dir, food, wrap = false) {
+  if (!record.pending?.length) return false;
+  const blocked = spawnExclusions(headIdx, snakeLen, dir, food, wrap);
+  // A wall popping in beside the head could kill a turn the player has already
+  // queued, so mid-run placement also keeps every cell within HEAD_CLEARANCE
+  // steps of the head clear — not just the straight line ahead.
+  const head = poolGet(headIdx, 0);
+  for (let dx = -HEAD_CLEARANCE; dx <= HEAD_CLEARANCE; dx++) {
+    for (let dy = -HEAD_CLEARANCE; dy <= HEAD_CLEARANCE; dy++) {
+      if (Math.abs(dx) + Math.abs(dy) > HEAD_CLEARANCE) continue;
+      let x = head.x + dx;
+      let y = head.y + dy;
+      if (wrap) {
+        x = ((x % COLS) + COLS) % COLS;
+        y = ((y % ROWS) + ROWS) % ROWS;
+      } else if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+      blocked.add(x * ROWS + y);
+    }
+  }
+  const still   = [];
+  for (const c of record.pending) {
+    const key = c.x * ROWS + c.y;
+    if (blocked.has(key)) { still.push(c); continue; }
+    record.set.add(key);
+    record.cells.push(c);
+  }
+  if (still.length === record.pending.length) return false;
+  record.pending = still;
+  record.version = ++obstacleVersion;
+  return true;
 }
 
 /** How many cells ahead of the head are kept clear of a mid-run wall drop. */
 export const LOOKAHEAD = 2;
+
+/** Manhattan radius around the head kept clear when a deferred wall is placed. */
+export const HEAD_CLEARANCE = 2;
 
 /**
  * Cells a new level's obstacles must not be dropped onto, given a board that is
@@ -310,7 +370,8 @@ export function useSnake() {
    *  5. Food check:
    *     - YES: score, best, level-up, new food  (tail kept → grows)
    *     - NO:  shrink snakeLen by 1             (tail "popped" by not counting it)
-   *  6. No setState for snake/food — GameCanvas reads refs directly via rAF.
+   *  6. Place any deferred walls whose cells are now clear.
+   *  7. No setState for snake/food — GameCanvas reads refs directly via rAF.
    */
   const tick = useCallback(() => {
     // 1. Dequeue next direction
@@ -410,7 +471,14 @@ export function useSnake() {
       // randomFood returns null only when every cell is occupied (board full).
       // In that case food stays where it is; the snake can't reach it without
       // self-collision, so no re-scoring is possible.
-      const newFood = randomFood(headIdxRef.current, snakeLenRef.current, obstaclesRef.current.set);
+      // Prefer cells that are not waiting for a pending wall, so the wall is not
+      // blocked by the food; fall back to any free cell when that is all there is.
+      const ob = obstaclesRef.current;
+      const newFood =
+        (ob.pending?.length > 0 &&
+          randomFood(headIdxRef.current, snakeLenRef.current,
+            [...ob.set, ...ob.pending.map(c => c.x * ROWS + c.y)])) ||
+        randomFood(headIdxRef.current, snakeLenRef.current, ob.set);
       if (newFood) {
         foodRef.current = newFood;
       }
@@ -419,6 +487,13 @@ export function useSnake() {
       // 5b. No food: pop tail by shrinking length (object stays in pool, no GC)
       snakeLenRef.current--;
     }
+
+    // 6. Drop in any of this level's walls that were held back at level-up
+    // because the snake or food was on them, now that their cell is clear.
+    placePendingObstacles(
+      obstaclesRef.current, headIdxRef.current, snakeLenRef.current,
+      dirRef.current, foodRef.current, wrapRef.current,
+    );
 
     // No setSnake / setFood — GameCanvas reads headIdxRef/snakeLenRef/foodRef directly.
   //

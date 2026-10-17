@@ -558,8 +558,28 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     // first frame so a level applied on mount (via ?level=N) is never missed.
     sceneRef.current = {
       scene, groundMat, gridMat, ambient, sun, fill,
-      mineMat, obstacleMat, obstacleMesh, obstacleHeight: OB_H,
+      mineMat, obstacleMat,
       portal, portalMat,
+    };
+
+    // ── Obstacle instances ───────────────────────────────────────────────────
+    // The engine's record can change without a level change (deferred walls
+    // drop in mid-level once the snake clears their cell), so the loop compares
+    // the record's version each frame and rewrites the instance matrices only
+    // when it moved. Obstacles come from the engine's ref, not from getLevel():
+    // the two legitimately differ while walls are pending.
+    let drawnObstacleVersion = -1;
+    const obstacleMatrix = new THREE.Matrix4();
+    const syncObstacles = (record) => {
+      const cells = record?.cells ?? [];
+      const n = Math.min(cells.length, obstacleMesh.instanceMatrix.count);
+      for (let i = 0; i < n; i++) {
+        obstacleMatrix.setPosition(worldX(cells[i].x), OB_H / 2, worldZ(cells[i].y));
+        obstacleMesh.setMatrixAt(i, obstacleMatrix);
+      }
+      obstacleMesh.count = n;
+      obstacleMesh.instanceMatrix.needsUpdate = true;
+      drawnObstacleVersion = record?.version ?? -1;
     };
 
     // ── rAF loop ──────────────────────────────────────────────────────────────
@@ -568,6 +588,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
 
     const loop = () => {
       if (stopped) return;
+      const obstacles = obstaclesRef?.current;
+      if (obstacles && obstacles.version !== drawnObstacleVersion) syncObstacles(obstacles);
       const now      = performance.now();
       const anim     = animRef.current;
       const food     = foodRef.current;
@@ -812,7 +834,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     if (sceneRef.current) sceneRef.current.portal.visible = wrap;
   }, [wrap]);
 
-  // ── Per-level theme + obstacle layout ───────────────────────────────────────
+  // ── Per-level theme ──────────────────────────────────────────────────────────
   // Runs on mount (after the effect above, which is declared first) and on every
   // level change. Mutates materials and lights in place; the scene graph itself
   // is never rebuilt.
@@ -831,20 +853,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     s.mineMat.color.set(theme.food);
     s.obstacleMat.color.set(theme.obstacle);
     s.portalMat.color.set(level.color);
-
-    // Obstacles come from the engine's ref, not from getLevel(): useSnake drops
-    // any generated cell that would land on the snake, the food, or directly
-    // ahead of the head, so the two can legitimately differ mid-run.
-    const cells = obstaclesRef?.current?.cells ?? [];
-    const m = new THREE.Matrix4();
-    const n = Math.min(cells.length, s.obstacleMesh.instanceMatrix.count);
-    for (let i = 0; i < n; i++) {
-      m.setPosition(worldX(cells[i].x), s.obstacleHeight / 2, worldZ(cells[i].y));
-      s.obstacleMesh.setMatrixAt(i, m);
-    }
-    s.obstacleMesh.count = n;
-    s.obstacleMesh.instanceMatrix.needsUpdate = true;
-  }, [levelIndex, obstaclesRef]);
+    // Obstacle instances are synced by the rAF loop from the engine's record
+    // version — see syncObstacles in the mount effect.
+  }, [levelIndex]);
 
   return (
     <canvas

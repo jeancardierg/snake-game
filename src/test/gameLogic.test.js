@@ -7,8 +7,8 @@
  * covered here — see useSnake.test.jsx for integration-level hook tests.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { COLS, ROWS, SPEED_FLOOR, DIR } from '../constants';
-import { getLevel, scoreNextFor, speedForLevel } from '../levels';
+import { COLS, ROWS, SPEED_FLOOR, SPEED_RAMP_MAX, DIR } from '../constants';
+import { getLevel, scoreNextFor, speedForLevel, speedAfterFoods, foodsForLevel } from '../levels';
 import { segPool, POOL_SIZE, initPool, poolGet, poolPrepend } from '../pool';
 
 // Levels are generated, not enumerated, so the curve assertions below sample a
@@ -38,6 +38,63 @@ describe('level curve', () => {
     }
     // Far enough out the geometric decay is well past the floor
     expect(speedForLevel(500)).toBe(SPEED_FLOOR);
+  });
+});
+
+// ─── Human limits ─────────────────────────────────────────────────────────────
+// Regression: the old curve (−8 ms per food, 40 ms floor) ended L06 at 89 ms and
+// every level from L08 at 40 ms (25 moves/s) — faster than a human can react to
+// or time a turn onto a single cell. These assert the design limits instead.
+
+/** Fastest tick a level reaches: after the last food before its level-up. */
+const endOfLevel = (n) => speedAfterFoods(n, foodsForLevel(n) - 1);
+
+/** Cells the head travels before a reactive desktop input lands (~350 ms). */
+const REACTION_MS = 350;
+const reactionCells = (tick) => REACTION_MS / tick;
+
+describe('speed vs human limits', () => {
+  it('no level ever runs faster than 100 ms per cell (10 moves/s)', () => {
+    expect(SPEED_FLOOR).toBeGreaterThanOrEqual(100);
+    for (let n = 0; n <= SAMPLE; n++) {
+      for (let k = 0; k < foodsForLevel(n); k++) {
+        expect(speedAfterFoods(n, k)).toBeGreaterThanOrEqual(SPEED_FLOOR);
+      }
+    }
+  });
+
+  it('the head never travels more than 3.5 cells before a reactive input lands', () => {
+    for (let n = 0; n <= SAMPLE; n++) {
+      expect(reactionCells(endOfLevel(n)), `level index ${n}`).toBeLessThanOrEqual(3.5);
+    }
+  });
+
+  it('the first five levels stay learnable: at most 2 cells of reaction travel', () => {
+    for (let n = 0; n < 5; n++) expect(reactionCells(endOfLevel(n))).toBeLessThanOrEqual(2);
+  });
+
+  it('the old L06 cliff is gone (ended at 89 ms; now well above 150 ms)', () => {
+    expect(endOfLevel(5)).toBeGreaterThan(150);
+  });
+});
+
+describe('per-food ramp', () => {
+  it('starts at the level base speed', () => {
+    for (let n = 0; n <= SAMPLE; n++) expect(speedAfterFoods(n, 0)).toBe(speedForLevel(n));
+  });
+
+  it('only ever speeds up within a level, and by at most SPEED_RAMP_MAX', () => {
+    for (let n = 0; n <= SAMPLE; n++) {
+      const base = speedForLevel(n);
+      for (let k = 1; k < 25; k++) {
+        expect(speedAfterFoods(n, k)).toBeLessThanOrEqual(speedAfterFoods(n, k - 1));
+        expect(speedAfterFoods(n, k)).toBeGreaterThanOrEqual(Math.round(base * (1 - SPEED_RAMP_MAX)) - 1);
+      }
+    }
+  });
+
+  it('ignores junk food counts', () => {
+    for (const bad of [undefined, null, NaN, -3]) expect(speedAfterFoods(4, bad)).toBe(speedForLevel(4));
   });
 
   it('each level has a strictly higher score threshold than the previous', () => {

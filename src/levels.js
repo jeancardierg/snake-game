@@ -17,7 +17,7 @@
  */
 import {
   COLS, ROWS,
-  BASE_SPEED, SPEED_DECAY, SPEED_FLOOR,
+  BASE_SPEED, SPEED_FLOOR, SPEED_APPROACH, SPEED_RAMP_PER_FOOD, SPEED_RAMP_MAX,
   FOODS_BASE, FOODS_PER_LEVEL, FOODS_MAX,
   MAX_OBSTACLES,
 } from './constants';
@@ -75,7 +75,18 @@ export function scoreNextFor(n) {
 
 /** Tick interval in ms for level n. Decays geometrically, floored. */
 export function speedForLevel(n) {
-  return Math.max(SPEED_FLOOR, Math.round(BASE_SPEED * Math.pow(SPEED_DECAY, n)));
+  return Math.max(SPEED_FLOOR, Math.round(SPEED_FLOOR + (BASE_SPEED - SPEED_FLOOR) * Math.pow(SPEED_APPROACH, n)));
+}
+
+/**
+ * Tick interval in ms after eating `foodsEaten` foods in level n: the level's
+ * base speed shortened by SPEED_RAMP_PER_FOOD per food, at most SPEED_RAMP_MAX,
+ * never below SPEED_FLOOR.
+ */
+export function speedAfterFoods(n, foodsEaten) {
+  const k    = Number.isFinite(foodsEaten) && foodsEaten > 0 ? foodsEaten : 0;
+  const ramp = Math.min(SPEED_RAMP_MAX, k * SPEED_RAMP_PER_FOOD);
+  return Math.max(SPEED_FLOOR, Math.round(speedForLevel(n) * (1 - ramp)));
 }
 
 // ─── Color helpers ────────────────────────────────────────────────────────────

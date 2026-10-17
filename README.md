@@ -153,7 +153,7 @@ Level data is not part of that flow: `getLevel(n)` in `levels.js` is a pure, mem
 The game loop runs inside a `setInterval`. Because closures capture variables at creation time, a plain `useState` value inside the interval would always read its initial value (stale closure). Every piece of game state that the tick function needs to read or write is mirrored in a `useRef` so it's always current. React state is updated in parallel so the UI re-renders.
 
 **Why a ring buffer?**
-The snake can be up to 100 segments long and the game loop runs up to ~25 times per second at the speed floor. Prepending to a JavaScript array every tick causes O(n) memory moves and GC pressure. The ring buffer (`pool.js`) pre-allocates all 100 segment objects once and mutates them in-place — zero allocation per tick regardless of snake length or speed.
+The snake can be up to `COLS × ROWS` = 169 segments long and the game loop runs up to ~25 times per second at the speed floor. Prepending to a JavaScript array every tick causes O(n) memory moves and GC pressure. The ring buffer (`pool.js`) pre-allocates all 169 segment objects once and mutates them in-place — zero allocation per tick regardless of snake length or speed.
 
 ---
 
@@ -164,15 +164,15 @@ The snake can be up to 100 segments long and the game loop runs up to ~25 times 
 Defines every magic number in one place.
 
 ```js
-COLS = 10             // grid width in cells
-ROWS = 10             // grid height in cells
-CELL = 20             // pixel size of each cell (logical pixels)
+COLS = 13             // grid width in cells (odd: the spawn row is the obstacle mirror axis)
+ROWS = 13             // grid height in cells
+CELL = 20             // world units per cell (on-screen size comes from the layout)
 BASE_SPEED = 300      // level 0 tick interval in ms
 SPEED_DECAY = 0.9     // speed multiplier applied per level
 FOODS_BASE = 5        // foods needed to clear level 0
 FOODS_PER_LEVEL = 1.5 // added per level, floored
 FOODS_MAX = 20        // quota plateau
-MAX_OBSTACLES = 12    // hard cap on wall cells per level
+MAX_OBSTACLES = 20    // hard cap on wall cells per level: ~12% of the board, multiple of 4
 SPEED_PER_FOOD = 8    // ms subtracted from tick interval per food eaten within a level
 SPEED_FLOOR = 40      // minimum tick interval in ms (hard cap)
 DIR_QUEUE_MAX = 2     // maximum buffered direction changes
@@ -221,19 +221,19 @@ Since every food is worth exactly 10 points, "eat N foods to clear the level" an
 
 Two hard guarantees, both covered by tests over 200 levels:
 
-- **Spawn safety** — no cell on the spawn row within the starting runway (`y === 5 && x <= 7`), so the player can never die before pressing a key. Kept in sync with `INIT_SNAKE` in `useSnake.js`.
+- **Spawn safety** — no cell on the spawn row within the starting runway (`y === SPAWN_ROW && x <= SPAWN_RUNWAY_X`; on 13×13: row 6, x ≤ 8), so the player can never die before pressing a key. `SPAWN_ROW`, `SPAWN_HEAD_X` and `SPAWN_RUNWAY_X` derive from the grid and `useSnake` builds `INIT_SNAKE` from them.
 - **Reachability** — `isReachable()` flood-fills from the spawn head and requires every free cell to be reachable. On failure the last group is dropped and the check repeats, falling back to an empty board. This is the critical guard: an unreachable pocket would let `randomFood` spawn food the player can never eat, soft-locking the level with no visible error.
 
 ---
 
 ### `pool.js`
 
-Pre-allocates `POOL_SIZE = COLS × ROWS = 100` `{x, y}` objects as a circular ring buffer.
+Pre-allocates `POOL_SIZE = COLS × ROWS = 169` `{x, y}` objects as a circular ring buffer.
 
 | Export | Description |
 |--------|-------------|
-| `segPool` | Shared array of 100 segment objects — read by `GameCanvas`, written by `useSnake` |
-| `POOL_SIZE` | Constant 100 — maximum possible snake length |
+| `segPool` | Shared array of 169 segment objects — read by `GameCanvas`, written by `useSnake` |
+| `POOL_SIZE` | `COLS × ROWS` (169) — maximum possible snake length |
 | `initPool(segments)` | Writes an initial segment array head-first; returns `headIdx = 0` |
 | `poolPrepend(headIdx, x, y)` | Writes a new head at `(headIdx − 1) % POOL_SIZE` in O(1); returns new `headIdx` |
 | `poolGet(headIdx, i)` | Returns segment at logical index `i` (0 = head) |
@@ -316,7 +316,7 @@ threw without Web Audio would break the whole suite.
 | `snakeLenRef` | `number` | Current live segment count |
 | `foodRef` | `{x,y}` | Current food cell (the mine) |
 | `score` / `scoreRef` | `number` | Current score (10 pts per food) |
-| `best` / `bestRef` | `number` | All-time best for the current mode, persisted in `localStorage` (`snakeBest` classic, `snakeBestWrap` wrap) |
+| `best` / `bestRef` | `number` | All-time best for the current mode and board size, persisted in `localStorage` (`snakeBest_13x13` classic, `snakeBestWrap_13x13` wrap). Records from another grid size are not carried over; the 10×10-era keys `snakeBest` / `snakeBestWrap` are removed on load |
 | `wrap` / `wrapRef` | `boolean` | Wrap-around mode, persisted in `localStorage` under `snakeWrap`; changed only via `toggleWrap()` while idle or dead |
 | `levelIndex` / `levelRef` | `number` | Current level index (unbounded — see `levels.js`) |
 | `obstaclesRef` | `{set, cells}` | Current level's wall cells: a `Set` of `x*ROWS+y` keys for O(1) collision checks, plus the matching cell list for `GameCanvas` |
@@ -413,7 +413,7 @@ a GPU-memory leak on remount / React Strict Mode.
 | Object | Description |
 |--------|-------------|
 | `WebGLRenderer` | Targets the `<canvas>` element; a `ResizeObserver` keeps the drawing buffer at the canvas's real CSS size × `devicePixelRatio` (capped at 2, see `canvasSize.js`), so the board renders 1:1 instead of being upscaled; pixel-ratio changes (monitor switch, zoom) are caught in the rAF loop |
-| `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (100)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
+| `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (130)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
 | `AmbientLight(0xfff6ec, 0.4)` | Warm-neutral base fill — prevents pure-shadow areas going black |
 | `DirectionalLight(0xfff4e0, 0.85)` | Sun from the upper-left; casts `PCFShadowMap` shadows on the ground |
 | `DirectionalLight(0x6688aa, 0.2)` | Cool fill from the lower-right for depth separation |
@@ -455,8 +455,8 @@ The food is a **mine**: a `Group` containing a dark metallic `SphereGeometry`, *
 #### Coordinate mapping
 
 ```
-world X = col * CELL − HALF + CELL/2   (range −90 to +90)
-world Z = row * CELL − HALF + CELL/2   (range −90 to +90)
+world X = col * CELL − HALF + CELL/2   (range −120 to +120 on 13×13)
+world Z = row * CELL − HALF + CELL/2   (range −120 to +120 on 13×13)
 world Y = resting height above ground
 ```
 

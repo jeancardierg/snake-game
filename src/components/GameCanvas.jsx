@@ -29,7 +29,7 @@ import { getLevel } from '../levels';
 import { segPool, POOL_SIZE } from '../pool';
 import { computeCanvasSize, MAX_PIXEL_RATIO } from '../canvasSize';
 
-const SIZE = COLS * CELL;   // 200 logical units
+const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
 
 // Grid cell (col,row) → world X / Z (Y is height). Scalar variants avoid the
@@ -251,11 +251,16 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     const sun = new THREE.DirectionalLight(0xfff4e0, 0.85);
     sun.position.set(-80, 180, -60);
     sun.castShadow = true;
-    sun.shadow.camera.left   = -120;
-    sun.shadow.camera.right  =  120;
-    sun.shadow.camera.top    =  120;
-    sun.shadow.camera.bottom = -120;
-    sun.shadow.mapSize.set(512, 512);
+    // Shadow frustum covers the whole board plus a margin for the offset sun,
+    // derived from the board size (it was a fixed ±120, sized for 10×10).
+    const SHADOW_HALF = HALF + CELL;
+    sun.shadow.camera.left   = -SHADOW_HALF;
+    sun.shadow.camera.right  =  SHADOW_HALF;
+    sun.shadow.camera.top    =  SHADOW_HALF;
+    sun.shadow.camera.bottom = -SHADOW_HALF;
+    // ~0.5 world unit per shadow texel, as on 10×10, rounded up to a power of two.
+    const shadowRes = 2 ** Math.ceil(Math.log2(SHADOW_HALF * 2 * 2));
+    sun.shadow.mapSize.set(shadowRes, shadowRes);
     sun.shadow.bias = -0.001;
     scene.add(sun);
 
@@ -360,7 +365,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     // so the index list for the first (N-1) ring gaps is a contiguous prefix of
     // the full precomputed index list — no per-frame index rebuild, no leaks.
     const RAD       = 10;                       // radial segments per ring
-    const MAX_RINGS = 180;                       // capacity (rings along length)
+    // Capacity: 2 rings per possible segment, so a near-full board still bends
+    // smoothly (a fixed 180 fell to ~1 ring/segment at 169 segments).
+    const MAX_RINGS = Math.max(180, POOL_SIZE * 2);
     const A_MAX     = CELL * 0.15;               // max slither amplitude (grid-accurate)
     const WAVES     = 1.6;                        // wave count along the body
 

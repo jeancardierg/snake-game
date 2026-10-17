@@ -1,9 +1,15 @@
 // ─── Grid dimensions ──────────────────────────────────────────────────────────
-// The board is a COLS × ROWS grid. Each cell is CELL logical pixels square.
-// Changing COLS/ROWS resizes the board; changing CELL resizes the visual size.
-export const COLS = 10;          // number of columns
-export const ROWS = 10;          // number of rows
-export const CELL = 20;          // pixels per cell (logical, before devicePixelRatio)
+// The board is a COLS × ROWS grid. Each cell is CELL world units square (the
+// on-screen size comes from the responsive layout, not from CELL).
+// Spawn, obstacle quadrants, the obstacle budget, the segment pool and the
+// renderer all derive from COLS/ROWS, so resizing needs no other edits.
+//
+// 13×13: odd, so the spawn row is the mirror axis of the 4-way obstacle
+// layouts, and still ≥ 21 CSS px per cell on the smallest phone measured
+// (iPhone SE, 279 px board). Was 10×10.
+export const COLS = 13;          // number of columns
+export const ROWS = 13;          // number of rows
+export const CELL = 20;          // world units per cell
 
 // ─── Level curve ──────────────────────────────────────────────────────────────
 // Levels are generated, not enumerated — see levels.js. Progression is endless
@@ -21,11 +27,11 @@ export const FOODS_BASE      = 5;
 export const FOODS_PER_LEVEL = 1.5;
 export const FOODS_MAX       = 20;
 
-// Hard cap on obstacle cells per level. On a 10×10 board this is the practical
-// ceiling before layouts start crowding out the growing snake.
-// Layouts are built from 4-way mirrored groups, so a multiple of 4 keeps the
-// cap actually reachable — at 10 the third group would never fit.
-export const MAX_OBSTACLES = 12;
+// Hard cap on obstacle cells per level: ~12% of the board, the density that
+// tested as the practical ceiling on 10×10 (12 of 100) before layouts crowd
+// out the growing snake. Layouts are built from 4-way mirrored groups, so the
+// cap is rounded down to a multiple of 4 to stay reachable. 13×13 → 20.
+export const MAX_OBSTACLES = Math.max(4, Math.floor((COLS * ROWS * 0.12) / 4) * 4);
 
 // ─── Per-food speed tuning ────────────────────────────────────────────────────
 // Each food eaten within a level reduces the tick interval by SPEED_PER_FOOD ms,

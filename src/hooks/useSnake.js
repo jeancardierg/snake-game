@@ -48,11 +48,21 @@ const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 initPool(INIT_SNAKE);
 
 // ─── Mode persistence ─────────────────────────────────────────────────────────
-// Best scores are tracked per mode: wrap-around is easier than classic, so a
-// shared record would be unfair. Classic keeps the original key so existing
-// records survive the upgrade.
+// Best scores are tracked per mode (wrap-around is easier than classic, so a
+// shared record would be unfair) and per board size: a record set on a smaller
+// board is not comparable, so changing COLS/ROWS starts fresh records. The
+// 10×10-era keys ('snakeBest', 'snakeBestWrap') are retired on load.
 const WRAP_KEY = 'snakeWrap';
-function bestKey(wrap) { return wrap ? 'snakeBestWrap' : 'snakeBest'; }
+const GRID_TAG = `${COLS}x${ROWS}`;
+export function bestKey(wrap) { return `${wrap ? 'snakeBestWrap' : 'snakeBest'}_${GRID_TAG}`; }
+export const LEGACY_BEST_KEYS = ['snakeBest', 'snakeBestWrap'];
+
+/** Remove best-score keys from before records were per board size. Never throws. */
+export function retireLegacyBestScores() {
+  try {
+    for (const k of LEGACY_BEST_KEYS) localStorage.removeItem(k);
+  } catch { /* storage unavailable — nothing to retire */ }
+}
 
 /** Read the persisted mode. Classic (false) unless wrap was explicitly chosen. */
 function readWrap() {
@@ -263,7 +273,10 @@ export function useSnake() {
   // snake and food are intentionally NOT state — GameCanvas reads refs directly.
   const [score, setScore]       = useState(0);
   const [wrap, setWrap]         = useState(readWrap);
-  const [best, setBest]         = useState(() => readBestScore(bestKey(wrap)));
+  const [best, setBest]         = useState(() => {
+    retireLegacyBestScores();
+    return readBestScore(bestKey(wrap));
+  });
   const [levelIndex, setLevel]  = useState(START_LEVEL);
   const [state, setState]       = useState('idle');
   // Transient level-up announcement. Owned here rather than derived in App from

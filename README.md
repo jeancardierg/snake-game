@@ -419,7 +419,7 @@ a GPU-memory leak on remount / React Strict Mode.
 | `DirectionalLight(0x6688aa, 0.2)` | Cool fill from the lower-right for depth separation |
 | `PlaneGeometry(SIZE, SIZE)` | Ground plane, `receiveShadow = true`; recolored per level theme |
 | `LineSegments` | Grid cell borders at Y=0.5 |
-| `InstancedMesh` | Obstacle blocks, fixed capacity `MAX_OBSTACLES`; `count` set per level, matrices written only when the layout changes — never in the rAF loop |
+| `InstancedMesh` | Obstacle blocks, fixed capacity `MAX_OBSTACLES`; the rAF loop rewrites matrices only when `obstaclesRef.current.version` changes (level-up, reset, or a deferred wall dropping in) — a single integer compare on every other frame |
 
 The colors above are the *level 0* defaults; every one of them is theme-driven.
 
@@ -432,9 +432,11 @@ rebuilt: teardown and rebuild would re-run the full disposal path on every
 level-up, which is both wasteful and leak-prone.
 
 Obstacle instances come from the engine's `obstaclesRef`, not from
-`getLevel(levelIndex).obstacles`: `useSnake` drops any generated cell that would
-land on the snake, the food, or directly ahead of the head, so the two can
-legitimately differ mid-run.
+`getLevel(levelIndex).obstacles`. On a mid-run level-up, `useSnake` holds back any
+generated cell that would land on the snake, the food, or directly ahead of the
+head, and keeps it in `pending`. Each tick drops pending walls in once their cell
+is clear, keeping a 2-step radius around the head free so a queued turn can never
+run into a wall that just appeared. Until then the two layouts legitimately differ.
 
 #### Snake rendering
 

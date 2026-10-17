@@ -10,7 +10,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSnake, buildObstacles, spawnExclusions, LOOKAHEAD } from '../hooks/useSnake';
+import {
+  useSnake, buildObstacles, spawnExclusions, LOOKAHEAD,
+  placePendingObstacles, HEAD_CLEARANCE,
+} from '../hooks/useSnake';
 import { COLS, ROWS, DIR } from '../constants';
 import { getLevel } from '../levels';
 import { segPool, POOL_SIZE, initPool } from '../pool';
@@ -403,6 +406,89 @@ describe('obstacles', () => {
   it('starts with an empty layout on level 0', () => {
     const { result } = renderHook(() => useSnake());
     expect(result.current.obstaclesRef.current.cells).toEqual([]);
+  });
+});
+
+// ─── Deferred obstacles ───────────────────────────────────────────────────────
+// Regression: a level-up used to drop every layout cell under the snake for the
+// rest of the level (playtest: L09 kept 2 of 8 walls). Those cells now wait in
+// `pending` and drop in once clear.
+
+describe('deferred obstacles', () => {
+  const key = (x, y) => x * ROWS + y;
+  const record = (pending) => ({ set: new Set(), cells: [], pending, version: 0 });
+  // Head (5,1) heading right, body trailing left; far from the spawn row.
+  const SNAKE_TOP = [{ x: 5, y: 1 }, { x: 4, y: 1 }, { x: 3, y: 1 }];
+  const FAR_FOOD  = { x: 0, y: ROWS - 1 };
+
+  it('buildObstacles holds excluded layout cells as pending instead of dropping them', () => {
+    const lvl = 12;
+    const all = getLevel(lvl).obstacles;
+    const excluded = new Set([key(all[0].x, all[0].y), key(all[1].x, all[1].y)]);
+    const r = buildObstacles(lvl, excluded);
+    expect(r.pending).toEqual([all[0], all[1]]);
+    expect(r.cells.length + r.pending.length).toBe(all.length);
+    expect(r.set.has(key(all[0].x, all[0].y))).toBe(false);
+  });
+
+  it('every built record gets a newer version', () => {
+    const a = buildObstacles(5);
+    const b = buildObstacles(5);
+    expect(b.version).toBeGreaterThan(a.version);
+  });
+
+  it('places a pending cell once nothing excludes it, and bumps the version', () => {
+    initPool(SNAKE_TOP);
+    const r = record([{ x: 3, y: 7 }]);
+    expect(placePendingObstacles(r, 0, 3, DIR.RIGHT, FAR_FOOD)).toBe(true);
+    expect(r.set.has(key(3, 7))).toBe(true);
+    expect(r.cells).toEqual([{ x: 3, y: 7 }]);
+    expect(r.pending).toEqual([]);
+    expect(r.version).toBeGreaterThan(0);
+  });
+
+  it('keeps a cell pending while the snake is on it', () => {
+    initPool(SNAKE_TOP);
+    const r = record([{ x: 3, y: 1 }]);   // the tail
+    expect(placePendingObstacles(r, 0, 3, DIR.RIGHT, FAR_FOOD)).toBe(false);
+    expect(r.pending).toEqual([{ x: 3, y: 1 }]);
+    expect(r.version).toBe(0);
+  });
+
+  it('keeps a cell pending while the food is on it', () => {
+    initPool(SNAKE_TOP);
+    const r = record([{ ...FAR_FOOD }]);
+    expect(placePendingObstacles(r, 0, 3, DIR.RIGHT, FAR_FOOD)).toBe(false);
+  });
+
+  it(`never drops a wall within ${HEAD_CLEARANCE} steps of the head, in any direction`, () => {
+    initPool(SNAKE_TOP);
+    const near = [{ x: 5, y: 3 }, { x: 6, y: 2 }, { x: 7, y: 1 }, { x: 5, y: 0 }];
+    const r = record(near.map(c => ({ ...c })));
+    expect(placePendingObstacles(r, 0, 3, DIR.RIGHT, FAR_FOOD)).toBe(false);
+    expect(r.pending.length).toBe(near.length);
+  });
+
+  it('wrap mode measures head clearance across the edge', () => {
+    initPool([{ x: 0, y: 5 }, { x: 1, y: 5 }, { x: 2, y: 5 }]);   // head on the left edge, heading left
+    const edge = { x: COLS - 1, y: 4 };                              // 1 step across the wrap + 1 up = 2
+    const wrapped = record([{ ...edge }]);
+    expect(placePendingObstacles(wrapped, 0, 3, DIR.LEFT, FAR_FOOD, true)).toBe(false);
+    const classic = record([{ ...edge }]);
+    expect(placePendingObstacles(classic, 0, 3, DIR.LEFT, FAR_FOOD, false)).toBe(true);
+  });
+
+  it('a wall under the tail drops in during play once the tail moves off', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.applyDir(DIR.UP));   // snake (5,5),(4,5),(3,5) → heading up
+    act(() => {
+      result.current.obstaclesRef.current = record([{ x: 3, y: 5 }]);   // under the tail
+      result.current.foodRef.current = { ...FAR_FOOD };
+    });
+    tick(0);   // head → (5,4); tail leaves (3,5), now 3 steps from the head
+    expect(result.current.state).toBe('running');
+    expect(result.current.obstaclesRef.current.set.has(key(3, 5))).toBe(true);
+    expect(result.current.obstaclesRef.current.pending).toEqual([]);
   });
 });
 

@@ -18,9 +18,10 @@ const SAMPLE = 50;
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 describe('constants', () => {
-  it('defines a 10×10 grid', () => {
-    expect(COLS).toBe(10);
-    expect(ROWS).toBe(10);
+  it('defines a 13×13 grid (odd, so the spawn row is the obstacle mirror axis)', () => {
+    expect(COLS).toBe(13);
+    expect(ROWS).toBe(13);
+    expect(ROWS % 2).toBe(1);
   });
 });
 

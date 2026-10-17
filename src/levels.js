@@ -266,10 +266,14 @@ function baseCellsFor(pattern, rng) {
   }
 }
 
+// The original curve added 1.2 cells per level on a 100-cell board. Scaling it
+// by board area keeps the same wall density at a given level on any grid.
+const OBSTACLES_PER_LEVEL = 1.2 * (COLS * ROWS) / 100;
+
 /** Obstacle cell budget for level n: none on level 0, at least one full group after. */
 export function obstacleTarget(n) {
   if (n <= 0) return 0;
-  return Math.min(MAX_OBSTACLES, Math.max(GROUP_SIZE, Math.floor(n * 1.2)));
+  return Math.min(MAX_OBSTACLES, Math.max(GROUP_SIZE, Math.floor(n * OBSTACLES_PER_LEVEL)));
 }
 
 /** The 4-way mirror group of a base cell, deduplicated. */
@@ -335,6 +339,10 @@ export function generateObstacles(n, rng) {
     // taking only part of it would break the mirror symmetry.
     if (group.some(c => isReserved(c.x, c.y) || used.has(cellKey(c.x, c.y)))) return;
     if (used.size + group.length > target) return;
+    // Validate as we go: a group that would seal off part of the board is
+    // skipped here, so the top-up below can still fill the budget instead of
+    // the final check having to drop groups after the fact.
+    if (!isReachable(groups.flat().concat(group))) return;
     for (const c of group) used.add(cellKey(c.x, c.y));
     groups.push(group);
   };
@@ -353,7 +361,8 @@ export function generateObstacles(n, rng) {
     });
   }
 
-  // Validate, dropping the last group on failure until the layout opens up.
+  // Defensive final check (every accepted group was already validated), dropping
+  // the last group on failure until the layout opens up.
   const MAX_ATTEMPTS = 8;
   for (let attempt = 0; attempt < MAX_ATTEMPTS && groups.length > 0; attempt++) {
     const cells = groups.flat();

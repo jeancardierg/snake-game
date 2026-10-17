@@ -12,10 +12,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import {
   useSnake, buildObstacles, spawnExclusions, LOOKAHEAD,
-  placePendingObstacles, HEAD_CLEARANCE,
+  placePendingObstacles, HEAD_CLEARANCE, bestKey, LEGACY_BEST_KEYS,
 } from '../hooks/useSnake';
 import { COLS, ROWS, DIR } from '../constants';
-import { getLevel } from '../levels';
+import { getLevel, SPAWN_ROW, SPAWN_HEAD_X } from '../levels';
 import { segPool, POOL_SIZE, initPool } from '../pool';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -44,7 +44,10 @@ function placeFoodAhead(result) {
 // The pool is module-level state shared by every hook instance, and useSnake
 // does not re-seed it on mount (only reset() does). Any test that calls
 // initPool directly would otherwise leak its snake into the tests that follow.
-const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
+// Same derivation as useSnake's INIT_SNAKE (board centre, heading right).
+const INIT_SNAKE = [0, 1, 2].map(i => ({ x: SPAWN_HEAD_X - i, y: SPAWN_ROW }));
+const CLASSIC_BEST = bestKey(false);
+const WRAP_BEST    = bestKey(true);
 
 // ─── Setup / teardown ─────────────────────────────────────────────────────────
 
@@ -81,7 +84,7 @@ describe('initial state', () => {
   });
 
   it('reads best from localStorage on mount', () => {
-    localStorage.setItem('snakeBest', '120');
+    localStorage.setItem(CLASSIC_BEST, '120');
     const { result } = renderHook(() => useSnake());
     expect(result.current.best).toBe(120);
   });
@@ -206,11 +209,11 @@ describe('score and level', () => {
     placeFoodAhead(result);
     tick(0);
     expect(result.current.best).toBe(10);
-    expect(localStorage.getItem('snakeBest')).toBe('10');
+    expect(localStorage.getItem(CLASSIC_BEST)).toBe('10');
   });
 
   it('best persists across reset', () => {
-    localStorage.setItem('snakeBest', '80');
+    localStorage.setItem(CLASSIC_BEST, '80');
     const { result } = renderHook(() => useSnake());
     expect(result.current.best).toBe(80);
     act(() => result.current.reset());
@@ -279,15 +282,15 @@ describe('spawnExclusions', () => {
   it('excludes the cells directly ahead of the head', () => {
     const ex = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD);
     for (let k = 1; k <= LOOKAHEAD; k++) {
-      expect(ex.has((5 + k) * ROWS + 5)).toBe(true);
+      expect(ex.has((SPAWN_HEAD_X + k) * ROWS + SPAWN_ROW)).toBe(true);
     }
   });
 
   it('follows the head direction, not a fixed axis', () => {
     const ex = spawnExclusions(0, 3, DIR.UP, DUMMY_FOOD);
-    expect(ex.has(5 * ROWS + 4)).toBe(true);   // one cell up
-    expect(ex.has(5 * ROWS + 3)).toBe(true);   // two cells up
-    expect(ex.has(6 * ROWS + 5)).toBe(false);  // not the old rightward path
+    expect(ex.has(SPAWN_HEAD_X * ROWS + SPAWN_ROW - 1)).toBe(true);        // one cell up
+    expect(ex.has(SPAWN_HEAD_X * ROWS + SPAWN_ROW - 2)).toBe(true);        // two cells up
+    expect(ex.has((SPAWN_HEAD_X + 1) * ROWS + SPAWN_ROW)).toBe(false);     // not the rightward path
   });
 
   it('excludes the current food cell', () => {
@@ -301,7 +304,7 @@ describe('spawnExclusions', () => {
   });
 
   it('wraps the look-ahead onto the opposite edge in wrap mode', () => {
-    initPool([{ x: 9, y: 5 }, { x: 8, y: 5 }, { x: 7, y: 5 }]);
+    initPool([{ x: COLS - 1, y: 5 }, { x: COLS - 2, y: 5 }, { x: COLS - 3, y: 5 }]);
     const classic = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD);
     const wrapped = spawnExclusions(0, 3, DIR.RIGHT, DUMMY_FOOD, true);
     for (let k = 1; k <= LOOKAHEAD; k++) {
@@ -350,12 +353,12 @@ describe('buildObstacles', () => {
 describe('obstacles', () => {
   it('kills the snake when the head runs into one', () => {
     const { result } = renderHook(() => useSnake());
-    act(() => result.current.applyDir(DIR.UP));   // head at (5,5), moving up
+    act(() => result.current.applyDir(DIR.UP));   // head at the spawn cell, moving up
     act(() => {
       // Wall off the cell directly ahead
       result.current.obstaclesRef.current = {
-        set: new Set([5 * ROWS + 4]),
-        cells: [{ x: 5, y: 4 }],
+        set: new Set([SPAWN_HEAD_X * ROWS + SPAWN_ROW - 1]),
+        cells: [{ x: SPAWN_HEAD_X, y: SPAWN_ROW - 1 }],
       };
     });
     tick(0);
@@ -384,7 +387,7 @@ describe('obstacles', () => {
     const blocked = [];
     for (let x = 2; x < COLS; x++) {
       for (let y = 0; y < ROWS; y++) {
-        if (x === 5) continue;             // keep the snake's column clear
+        if (x === SPAWN_HEAD_X) continue;  // keep the snake's column clear
         blocked.push({ x, y });
       }
     }
@@ -492,6 +495,41 @@ describe('deferred obstacles', () => {
   });
 });
 
+// ─── Best-score reset on board resize ─────────────────────────────────────────
+// Records from the 10×10 board are not comparable with 13×13, so best scores
+// are keyed per board size and the 10×10-era keys are retired.
+
+describe('best scores per board size', () => {
+  it('keys records by grid size and mode', () => {
+    expect(bestKey(false)).toBe(`snakeBest_${COLS}x${ROWS}`);
+    expect(bestKey(true)).toBe(`snakeBestWrap_${COLS}x${ROWS}`);
+  });
+
+  it('does not carry a 10×10-era record over to the new board', () => {
+    localStorage.setItem('snakeBest', '900');
+    localStorage.setItem('snakeBestWrap', '700');
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.best).toBe(0);
+  });
+
+  it('removes the legacy keys on mount', () => {
+    for (const k of LEGACY_BEST_KEYS) localStorage.setItem(k, '500');
+    renderHook(() => useSnake());
+    for (const k of LEGACY_BEST_KEYS) expect(localStorage.getItem(k)).toBeNull();
+  });
+
+  it('keeps a record set on the current board', () => {
+    localStorage.setItem(bestKey(false), '340');
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.best).toBe(340);
+  });
+
+  it('survives storage that throws', () => {
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    expect(() => renderHook(() => useSnake())).not.toThrow();
+  });
+});
+
 // ─── Wrap-around mode ─────────────────────────────────────────────────────────
 
 describe('wrap mode', () => {
@@ -522,9 +560,9 @@ describe('wrap mode', () => {
     const { result } = renderHook(() => useSnake());
     act(() => result.current.toggleWrap());
     act(() => result.current.applyDir(DIR.UP));
-    for (let i = 0; i < 6; i++) tick();   // y: 5 → 0, then across the edge
+    for (let i = 0; i <= SPAWN_ROW; i++) tick();   // up to row 0, then across the edge
     expect(result.current.state).toBe('running');
-    expect(headOf(result)).toMatchObject({ x: 5, y: ROWS - 1 });
+    expect(headOf(result)).toMatchObject({ x: SPAWN_HEAD_X, y: ROWS - 1 });
   });
 
   it('exits the right edge and re-enters at the left', () => {
@@ -532,9 +570,10 @@ describe('wrap mode', () => {
     act(() => { result.current.foodRef.current = { x: 0, y: 0 }; });  // off the path
     act(() => result.current.toggleWrap());
     act(() => result.current.applyDir(DIR.RIGHT));   // starts the run (already heading right)
-    for (let i = 0; i < 5; i++) tick();   // x: 5 → 9, then across the edge
+    const steps = COLS - SPAWN_HEAD_X;     // to the last column, then across the edge
+    for (let i = 0; i < steps; i++) tick();
     expect(result.current.state).toBe('running');
-    expect(headOf(result)).toMatchObject({ x: 0, y: 5 });
+    expect(headOf(result)).toMatchObject({ x: 0, y: SPAWN_ROW });
   });
 
   it('is locked while a run is in progress', () => {
@@ -557,8 +596,8 @@ describe('wrap mode', () => {
   });
 
   it('tracks best score separately per mode', () => {
-    localStorage.setItem('snakeBest', '50');
-    localStorage.setItem('snakeBestWrap', '20');
+    localStorage.setItem(CLASSIC_BEST, '50');
+    localStorage.setItem(WRAP_BEST, '20');
     const { result } = renderHook(() => useSnake());
     expect(result.current.best).toBe(50);
     act(() => result.current.toggleWrap());
@@ -574,8 +613,8 @@ describe('wrap mode', () => {
     placeFoodAhead(result);
     tick();
     expect(result.current.best).toBe(10);
-    expect(localStorage.getItem('snakeBestWrap')).toBe('10');
-    expect(localStorage.getItem('snakeBest')).toBeNull();
+    expect(localStorage.getItem(WRAP_BEST)).toBe('10');
+    expect(localStorage.getItem(CLASSIC_BEST)).toBeNull();
   });
 });
 
@@ -685,7 +724,7 @@ describe('visibility change', () => {
 
 describe('localStorage resilience', () => {
   it('treats corrupt localStorage value as 0 (not NaN)', () => {
-    localStorage.setItem('snakeBest', 'not-a-number');
+    localStorage.setItem(CLASSIC_BEST, 'not-a-number');
     const { result } = renderHook(() => useSnake());
     // parseInt('not-a-number') = NaN; readBestScore must sanitize it to exactly 0
     // so it renders correctly and doesn't permanently block best-score updates.
@@ -693,7 +732,7 @@ describe('localStorage resilience', () => {
   });
 
   it('treats a negative localStorage value as 0', () => {
-    localStorage.setItem('snakeBest', '-50');
+    localStorage.setItem(CLASSIC_BEST, '-50');
     const { result } = renderHook(() => useSnake());
     expect(result.current.best).toBe(0);
   });

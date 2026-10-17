@@ -27,6 +27,7 @@ import * as THREE from 'three';
 import { COLS, ROWS, CELL, MAX_OBSTACLES } from '../constants';
 import { getLevel } from '../levels';
 import { segPool, POOL_SIZE } from '../pool';
+import { computeCanvasSize, MAX_PIXEL_RATIO } from '../canvasSize';
 
 const SIZE = COLS * CELL;   // 200 logical units
 const HALF = SIZE / 2;      // 100
@@ -204,8 +205,6 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
 
     // ── Renderer ─────────────────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
-    renderer.setSize(SIZE, SIZE, false);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type    = THREE.PCFShadowMap;  // PCFSoftShadowMap was removed in three r186
 
@@ -218,6 +217,30 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     cam.position.set(0, 300, 0);
     cam.up.set(0, 0, -1);
     cam.lookAt(0, 0, 0);
+
+    // ── Drawing-buffer size ──────────────────────────────────────────────────
+    // Follow the canvas's real CSS size × devicePixelRatio (capped), so the
+    // board stays sharp at any layout size. The frustum stays exactly the
+    // board (wrap rendering depends on that); a non-square canvas gets a
+    // centred square viewport rather than a stretched image.
+    let applied = { width: 0, height: 0, pixelRatio: 0 };
+    const resize = () => {
+      const next = computeCanvasSize(canvas.clientWidth, canvas.clientHeight, window.devicePixelRatio);
+      if (next.width === applied.width && next.height === applied.height
+          && next.pixelRatio === applied.pixelRatio) return;
+      applied = next;
+      renderer.setPixelRatio(next.pixelRatio);
+      renderer.setSize(next.width, next.height, false);
+      const { x, y, size } = next.viewport;
+      renderer.setViewport(x, y, size, size);
+      renderer.setScissor(x, y, size, size);
+      renderer.setScissorTest(size !== next.width || size !== next.height);
+    };
+    resize();
+    // ResizeObserver does not fire on a pixel-ratio change (window dragged to
+    // another monitor, browser zoom); the rAF loop below checks for that.
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+    resizeObserver?.observe(canvas);
 
     // ── Lighting ─────────────────────────────────────────────────────────────
     // Daylight-neutral lighting so the grass ground renders true green
@@ -588,6 +611,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
 
     const loop = () => {
       if (stopped) return;
+      if (Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO) !== applied.pixelRatio) resize();
       const obstacles = obstaclesRef?.current;
       if (obstacles && obstacles.version !== drawnObstacleVersion) syncObstacles(obstacles);
       const now      = performance.now();
@@ -806,6 +830,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     return () => {
       stopped = true;
       cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
       // Release all GPU resources. renderer.dispose() alone does NOT free
       // geometries, materials, or textures — walk the scene and dispose them
       // explicitly to avoid a GPU-memory leak on unmount / StrictMode remount.

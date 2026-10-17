@@ -4,6 +4,7 @@ body {
   background: #0a0a0f;
   color: #e0e0e0;
   font-family: 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;   /* fallback for browsers without svh */
   min-height: 100svh;
   display: flex;
   align-items: center;
@@ -17,22 +18,47 @@ body {
   justify-content: center;
 }
 
-/* ── App layout ── */
+/* ── App layout ──
+   One full-viewport column. The board takes whatever height is left after the
+   fixed rows and is the largest square that fits (see .board-slot), so nothing
+   is pushed below the fold on short phones and the board grows on big screens.
+   svh = the viewport with mobile browser bars shown, so the D-pad never ends up
+   under Safari/Chrome's toolbar. */
 .app {
+  --board-max: 720px;               /* desktop cap — beyond this cells get silly-large */
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 16px 0;
+  gap: 8px;
   width: 100%;
-  max-width: 100%;
+  height: 100vh;                    /* fallback */
+  height: 100svh;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
 }
 
-@media (min-width: 900px) {
-  .app {
-    padding: 16px;
-    max-width: 420px;
-  }
+/* Fixed rows line up with the board edges. --board-w is published by App from
+   the board's measured width; the fallback keeps them sane before first paint. */
+.app > .scoreboard,
+.app > .level-bar-wrap,
+.app > .controls-hint {
+  flex: none;
+  /* Never narrower than the four control buttons need, even beside a small board. */
+  width: min(100%, max(var(--board-w, var(--board-max)), 300px));
+}
+
+/* Flexible area the board is fitted into. A size container lets the board
+   use min(width, height) of the space actually left, in pure CSS. */
+.board-slot {
+  flex: 1 1 0;
+  min-height: 200px;                /* below this the page scrolls instead of shrinking further */
+  width: 100%;
+  container-type: size;
+  display: grid;
+  place-items: center;
 }
 
 /* ── Scoreboard ── */
@@ -125,9 +151,12 @@ body {
 /* ── Canvas wrapper ── */
 .canvas-wrap {
   position: relative;
-  width: 100%;
+  width: min(100cqw, 100cqh, var(--board-max));
   aspect-ratio: 1;
-  max-width: 400px;
+}
+/* Browsers without size container queries (Safari < 16): previous behaviour. */
+@supports not (container-type: size) {
+  .canvas-wrap { width: min(100%, 400px); }
 }
 .canvas-wrap canvas {
   width: 100%;
@@ -282,8 +311,34 @@ body {
   outline: 2px solid var(--dpad-color, #4ecca3);
   outline-offset: 2px;
 }
-@media (min-width: 900px) {
+.dpad { flex: none; }
+/* Hide the D-pad where there is a precise pointer and hover (mouse/trackpad)
+   rather than by width: tablets and landscape phones are wider than the old
+   900px breakpoint but still need it, and swipe still works everywhere. */
+@media (hover: hover) and (pointer: fine) {
   .dpad { display: none; }
+}
+
+/* ── Landscape phones ──
+   Too short for a stacked column (the board collapsed to ~40px). Board on the
+   left at full height, score / level / D-pad / buttons stacked on the right. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .app {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto 1fr auto;
+    column-gap: 12px;
+    row-gap: 8px;
+    align-items: center;
+  }
+  .board-slot { grid-column: 1; grid-row: 1 / -1; height: 100%; min-height: 0; }
+  .app > .scoreboard,
+  .app > .level-bar-wrap,
+  .app > .controls-hint { grid-column: 2; width: 260px; }
+  .app > .scoreboard    { grid-row: 1; }
+  .app > .level-bar-wrap { grid-row: 2; }
+  .app > .dpad          { grid-column: 2; grid-row: 3; justify-self: center; }
+  .app > .controls-hint { grid-row: 4; flex-wrap: wrap; justify-content: center; }
 }
 
 /* ── Score flash animation ── */
@@ -310,3 +365,25 @@ body {
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* ── Compact chrome for short touch screens ──
+   Every pixel of height given to the rows above/below is taken from the board.
+   On touch devices the keyboard hint is noise (the D-pad is right there). */
+@media (pointer: coarse) {
+  .controls-hint > span { display: none; }
+}
+@media (pointer: coarse) and (max-height: 760px),
+       (orientation: landscape) and (max-height: 520px) {
+  .app { gap: 6px; }
+  .scoreboard { padding: 4px 10px; }
+  .score-value { font-size: 18px; }
+  .level-card-center { flex-direction: row; gap: 8px; }
+}
+/* Only the shortest screens trade 4px of D-pad key for board space; 40px keys
+   stay well above the WCAG 2.5.8 minimum target size (24px). */
+@media (pointer: coarse) and (max-height: 620px),
+       (orientation: landscape) and (max-height: 520px) {
+  .dpad {
+    grid-template-rows: repeat(3, 40px);
+    grid-template-columns: repeat(3, 40px);
+  }
+}

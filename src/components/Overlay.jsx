@@ -49,7 +49,7 @@ export function Overlay({ state, score, levelIndex, banner, onReset, onPause }) 
         <h1 className="overlay-title">SNAKE</h1>
         <p className="overlay-level-id" style={{ color: level.color }}>{level.title}</p>
         <p className="overlay-hint">Arrow keys / WASD to start</p>
-        <p className="overlay-hint small">P to pause · Mobile: D-Pad below</p>
+        <p className="overlay-hint small">P to pause · Touch: swipe or D-Pad</p>
       </div>
     );
   }

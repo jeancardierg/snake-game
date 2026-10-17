@@ -397,7 +397,7 @@ Swipe gesture detection runs here: `onTouchStart` records the finger's starting 
 
 Maintains `stateRef` — a plain ref mirror of the `state` value that `GameCanvas`'s rAF loop reads without triggering re-renders (it drives the slither/tongue animation and the death shake).
 
-Also owns the music mute mirror: `music.js` holds the preference and its `localStorage` persistence, and `App` keeps a `musicOn` state only so the 🔊 Music button label re-renders. The `.controls-hint` row below the D-Pad holds that button plus Pause and Reset.
+Also owns the music mute mirror: `music.js` holds the preference and its `localStorage` persistence, and `App` keeps a `musicOn` state only so the 🔊 Music button label re-renders. The `.controls-hint` row below the D-Pad holds that button plus Pause, Reset and the walls/wrap toggle.
 
 ---
 
@@ -541,9 +541,12 @@ It is a class because error boundaries have no hooks equivalent as of React 19 �
 Global styles with a dark theme. Key sections:
 
 - **Body** — centered flex layout, `#0a0a0f` background
-- **`.app`** — vertical flex column, full width on mobile, max-width 420px on desktop (≥900px)
-- **`.canvas-wrap`** — `aspect-ratio: 1` container, `position: relative` for overlay positioning
-- **`.dpad`** — CSS Grid `3×3` layout; center cell empty; buttons at N/S/E/W
+- **`.app`** — one full-viewport column (`100svh`, so mobile browser bars never cover the controls) with safe-area padding for notches and home bars. The scoreboard, level bar and controls row line up with the board via `--board-w` (published by `App` from the board's measured width, min 300px).
+- **`.board-slot`** — the flexible area left after the fixed rows; a size container (`container-type: size`)
+- **`.canvas-wrap`** — the board: `width: min(100cqw, 100cqh, 720px)` + `aspect-ratio: 1`, i.e. the largest square that fits, capped at 720px on desktop. Browsers without size containers fall back to the old `min(100%, 400px)`.
+- **`.dpad`** — CSS Grid `3×3` layout; center cell empty; buttons at N/S/E/W. Hidden where the primary pointer is fine and can hover (mouse/trackpad), not by width — tablets and landscape phones keep it.
+- **Landscape phones** (`orientation: landscape` and height ≤ 520px) — board left at full height, score / level / D-pad / buttons stacked in a 260px column on the right
+- **Short touch screens** — compact scoreboard and tighter gaps below 760px of height; below 620px the D-pad keys go from 44px to 40px (still well above the WCAG 2.5.8 24px minimum); the keyboard hint is hidden on touch devices
 - **`.dpad-btn`** — `touch-action: none; user-select: none` for immediate pointer events
 - **`.overlay`** — `position: absolute; inset: 0` + `backdrop-filter: blur`
 - **Color contrast** — all text meets WCAG AA on `#0a0a0f` background

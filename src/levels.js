@@ -37,11 +37,14 @@ export function mulberry32(seed) {
 }
 
 // ─── Spawn safety ─────────────────────────────────────────────────────────────
-// INIT_SNAKE in useSnake.js is (5,5),(4,5),(3,5) heading right. Obstacles must
-// never occupy those cells or the runway ahead of the head, or the player would
-// die before pressing a key. Kept in sync with useSnake.js INIT_SNAKE.
-export const SPAWN_ROW      = 5;
-export const SPAWN_RUNWAY_X = 7;   // reserve x = 0..7 on SPAWN_ROW
+// The snake spawns at the board centre heading right (useSnake builds
+// INIT_SNAKE from these constants, so the two can never drift apart).
+// Obstacles must never occupy those cells or the runway ahead of the head, or
+// the player would die before pressing a key. All derived from the grid size,
+// so resizing the board needs no edits here. On 10×10: head (5,5), runway 0..7.
+export const SPAWN_ROW      = Math.floor(ROWS / 2);
+export const SPAWN_HEAD_X   = Math.floor(COLS / 2);
+export const SPAWN_RUNWAY_X = Math.min(COLS - 1, SPAWN_HEAD_X + 2);  // head + 2 cells ahead
 
 function isReserved(x, y) {
   return y === SPAWN_ROW && x <= SPAWN_RUNWAY_X;
@@ -226,26 +229,47 @@ const PATTERNS = ['pillars', 'corners', 'cross', 'diagonal', 'ring'];
 // Base cells live in the top-left quadrant, one cell in from the border, and are
 // mirrored across both axes. Interior-only keeps layouts off the outer wall,
 // where they would otherwise read as a thicker board edge.
+//
+// The spawn row is reserved, so any base row whose vertical mirror IS the spawn
+// row can never yield a legal group. On an even board that is the quadrant's
+// last row (row 4 mirrors onto row 5 on 10×10), so the quadrant stops one row
+// short. On an odd board the spawn row is the mirror axis itself and the
+// quadrant never reaches it.
+const SPAWN_MIRROR_ROW = ROWS - 1 - SPAWN_ROW;
 const QX = [1, Math.floor(COLS / 2) - 1];
-const QY = [1, Math.floor(ROWS / 2) - 1];
+const QY = [1, Math.floor(ROWS / 2) - 1 - (SPAWN_MIRROR_ROW === Math.floor(ROWS / 2) - 1 ? 1 : 0)];
+
+/** Smallest group a layout can be built from — a full 4-way mirror group. */
+const GROUP_SIZE = 4;
 
 function baseCellsFor(pattern, rng) {
   const jx = () => QX[0] + Math.floor(rng() * (QX[1] - QX[0] + 1));
   const jy = () => QY[0] + Math.floor(rng() * (QY[1] - QY[0] + 1));
+  // Clamp an authored offset into the quadrant so patterns survive any board size.
+  const at = (dx, dy) => ({ x: Math.min(QX[1], QX[0] + dx), y: Math.min(QY[1], QY[0] + dy) });
 
   switch (pattern) {
     case 'corners':
-      return [{ x: QX[0] + 1, y: QY[0] + 1 }, { x: QX[0] + 2, y: QY[0] + 1 }];
+      return [at(1, 1), at(2, 1)];
     case 'cross':
-      return [{ x: Math.floor(COLS / 2) - 1, y: jy() }, { x: jx(), y: Math.floor(ROWS / 2) - 1 }];
-    case 'diagonal':
-      return [{ x: QX[0] + 1, y: QY[0] + 1 }, { x: QX[0] + 2, y: QY[0] + 2 }, { x: QX[0] + 3, y: QY[0] + 3 }];
+      // Arms run along the quadrant's inner edge so they meet near the centre.
+      return [{ x: QX[1], y: jy() }, { x: jx(), y: QY[1] }];
+    case 'diagonal': {
+      const len = Math.min(QX[1] - QX[0], QY[1] - QY[0]);
+      return Array.from({ length: len }, (_, i) => ({ x: QX[0] + 1 + i, y: QY[0] + 1 + i }));
+    }
     case 'ring':
-      return [{ x: QX[0] + 2, y: QY[0] }, { x: QX[0], y: QY[0] + 2 }, { x: QX[0] + 1, y: QY[0] + 1 }];
+      return [at(2, 0), at(0, 2), at(1, 1)];
     case 'pillars':
     default:
       return [{ x: jx(), y: jy() }, { x: jx(), y: jy() }, { x: jx(), y: jy() }];
   }
+}
+
+/** Obstacle cell budget for level n: none on level 0, at least one full group after. */
+export function obstacleTarget(n) {
+  if (n <= 0) return 0;
+  return Math.min(MAX_OBSTACLES, Math.max(GROUP_SIZE, Math.floor(n * 1.2)));
 }
 
 /** The 4-way mirror group of a base cell, deduplicated. */
@@ -274,8 +298,8 @@ export function isReachable(obstacles) {
   const blocked = new Set(obstacles.map(o => cellKey(o.x, o.y)));
   const total   = COLS * ROWS - blocked.size;
   const seen    = new Set();
-  const stack   = [{ x: 5, y: SPAWN_ROW }];
-  seen.add(cellKey(5, SPAWN_ROW));
+  const stack   = [{ x: SPAWN_HEAD_X, y: SPAWN_ROW }];
+  seen.add(cellKey(SPAWN_HEAD_X, SPAWN_ROW));
 
   while (stack.length) {
     const { x, y } = stack.pop();
@@ -298,21 +322,35 @@ export function isReachable(obstacles) {
  * generated pattern cannot be made valid within MAX_ATTEMPTS.
  */
 export function generateObstacles(n, rng) {
-  const target = Math.min(MAX_OBSTACLES, Math.floor(n * 1.2));
+  const target = obstacleTarget(n);
   if (target <= 0) return [];
 
   const pattern = PATTERNS[Math.floor(rng() * PATTERNS.length)];
   const groups  = [];
   const used    = new Set();
 
-  for (const base of baseCellsFor(pattern, rng)) {
+  const tryAdd = (base) => {
     const group = mirrorGroup(base.x, base.y);
     // Reject the whole group if any member is reserved or already placed —
     // taking only part of it would break the mirror symmetry.
-    if (group.some(c => isReserved(c.x, c.y) || used.has(cellKey(c.x, c.y)))) continue;
-    if (used.size + group.length > target) continue;
+    if (group.some(c => isReserved(c.x, c.y) || used.has(cellKey(c.x, c.y)))) return;
+    if (used.size + group.length > target) return;
     for (const c of group) used.add(cellKey(c.x, c.y));
     groups.push(group);
+  };
+
+  for (const base of baseCellsFor(pattern, rng)) tryAdd(base);
+
+  // A pattern can fall short of the budget (its seeds collide, or it has fewer
+  // groups than the budget allows). Top up with mirrored pillars so difficulty
+  // tracks the level instead of the luck of the pattern draw. Bounded, and
+  // driven by the level's own rng, so layouts stay deterministic.
+  const TOP_UP_TRIES = 24;
+  for (let t = 0; t < TOP_UP_TRIES && used.size + GROUP_SIZE <= target; t++) {
+    tryAdd({
+      x: QX[0] + Math.floor(rng() * (QX[1] - QX[0] + 1)),
+      y: QY[0] + Math.floor(rng() * (QY[1] - QY[0] + 1)),
+    });
   }
 
   // Validate, dropping the last group on failure until the layout opens up.

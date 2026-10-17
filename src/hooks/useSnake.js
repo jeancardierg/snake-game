@@ -31,15 +31,16 @@
  */
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { COLS, ROWS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
-import { getLevel } from '../levels';
+import { getLevel, SPAWN_ROW, SPAWN_HEAD_X, SPAWN_RUNWAY_X } from '../levels';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 import { playStart, playEat, playLevelUp, playDeath } from '../audio';
 import { startMusic, stopMusic, pauseMusic, resumeMusic } from '../music';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
-// NOTE: levels.js reserves SPAWN_ROW / SPAWN_RUNWAY_X from obstacle placement
-// based on these values — keep the two in sync.
-const INIT_SNAKE = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
+// Built from the spawn constants in levels.js, which reserve this row and the
+// runway ahead of the head from obstacle placement — one source of truth.
+// On 10×10: (5,5),(4,5),(3,5).
+const INIT_SNAKE = [0, 1, 2].map(i => ({ x: SPAWN_HEAD_X - i, y: SPAWN_ROW }));
 const INIT_DIR   = { x: 1, y: 0 };  // starts moving right
 
 // Seed the pool with the initial snake on module load.
@@ -219,8 +220,9 @@ export function useSnake() {
   const headIdxRef  = useRef(0);                // index of head segment in segPool
   const snakeLenRef = useRef(INIT_SNAKE.length);// live segment count
 
-  // (7,5) sits on the reserved spawn row, so it can never collide with an obstacle.
-  const foodRef     = useRef({ x: 7, y: 5 });
+  // The end of the reserved runway, so it can never collide with an obstacle.
+  // On 10×10: (7,5).
+  const foodRef     = useRef({ x: SPAWN_RUNWAY_X, y: SPAWN_ROW });
   const scoreRef    = useRef(0);
   const bestRef     = useRef(best);
   const wrapRef     = useRef(wrap);

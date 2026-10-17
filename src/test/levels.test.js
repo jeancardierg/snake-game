@@ -13,7 +13,8 @@ import { describe, it, expect } from 'vitest';
 import { COLS, ROWS, MAX_OBSTACLES } from '../constants';
 import {
   getLevel, mulberry32, isReachable, generateObstacles,
-  foodsForLevel, scoreNextFor, SPAWN_ROW, SPAWN_RUNWAY_X,
+  foodsForLevel, scoreNextFor, SPAWN_ROW, SPAWN_RUNWAY_X, SPAWN_HEAD_X,
+  obstacleTarget,
 } from '../levels';
 
 const RANGE = 200;
@@ -165,12 +166,56 @@ describe('obstacle layouts', () => {
     expect(getLevel(0).obstacles).toEqual([]);
   });
 
-  it('actually place obstacles once the game gets going', () => {
-    const withWalls = [];
-    for (let n = 0; n <= 40; n++) {
-      if (getLevel(n).obstacles.length > 0) withWalls.push(n);
+  it('place at least one full mirror group on every level after the first', () => {
+    // Regression: levels 1–3 (L02–L04) used to get a 1–3 cell budget, smaller
+    // than any 4-cell group, so they silently shipped with no obstacles.
+    for (let n = 1; n <= RANGE; n++) {
+      expect(getLevel(n).obstacles.length, `level index ${n}`).toBeGreaterThanOrEqual(4);
     }
-    expect(withWalls.length).toBeGreaterThan(20);
+  });
+
+  it('L02–L04 are no longer obstacle-free', () => {
+    for (const n of [1, 2, 3]) expect(getLevel(n).obstacles.length).toBe(4);
+  });
+
+  it('fill the budget to within one group', () => {
+    for (let n = 1; n <= RANGE; n++) {
+      expect(getLevel(n).obstacles.length).toBeGreaterThan(obstacleTarget(n) - 4);
+    }
+  });
+
+  it('are 4-way mirror symmetric', () => {
+    for (let n = 0; n <= RANGE; n++) {
+      const cells = getLevel(n).obstacles;
+      const keys  = new Set(cells.map(c => `${c.x},${c.y}`));
+      for (const { x, y } of cells) {
+        expect(keys.has(`${COLS - 1 - x},${y}`)).toBe(true);
+        expect(keys.has(`${x},${ROWS - 1 - y}`)).toBe(true);
+      }
+    }
+  });
+});
+
+describe('obstacleTarget', () => {
+  it('is zero on level 0 and never below one group afterwards', () => {
+    expect(obstacleTarget(0)).toBe(0);
+    for (let n = 1; n <= RANGE; n++) expect(obstacleTarget(n)).toBeGreaterThanOrEqual(4);
+  });
+
+  it('never decreases and caps at MAX_OBSTACLES', () => {
+    for (let n = 1; n <= RANGE; n++) {
+      expect(obstacleTarget(n)).toBeGreaterThanOrEqual(obstacleTarget(n - 1));
+      expect(obstacleTarget(n)).toBeLessThanOrEqual(MAX_OBSTACLES);
+    }
+  });
+});
+
+describe('spawn constants', () => {
+  it('derive from the grid: centre head, runway two cells ahead, on the board', () => {
+    expect(SPAWN_ROW).toBe(Math.floor(ROWS / 2));
+    expect(SPAWN_HEAD_X).toBe(Math.floor(COLS / 2));
+    expect(SPAWN_RUNWAY_X).toBe(Math.min(COLS - 1, SPAWN_HEAD_X + 2));
+    expect(SPAWN_HEAD_X - 2).toBeGreaterThanOrEqual(0);   // 3-segment body fits
   });
 });
 

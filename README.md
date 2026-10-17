@@ -412,7 +412,7 @@ a GPU-memory leak on remount / React Strict Mode.
 
 | Object | Description |
 |--------|-------------|
-| `WebGLRenderer` | Targets the `<canvas>` element; `setPixelRatio(devicePixelRatio)`; fixed 200×200-unit drawing buffer, CSS-scaled to the container |
+| `WebGLRenderer` | Targets the `<canvas>` element; a `ResizeObserver` keeps the drawing buffer at the canvas's real CSS size × `devicePixelRatio` (capped at 2, see `canvasSize.js`), so the board renders 1:1 instead of being upscaled; pixel-ratio changes (monitor switch, zoom) are caught in the rAF loop |
 | `OrthographicCamera` | Top-down view; `left/right/top/bottom = ±HALF (100)`; `cam.up = (0,0,−1)` so grid row 0 appears at the screen top |
 | `AmbientLight(0xfff6ec, 0.4)` | Warm-neutral base fill — prevents pure-shadow areas going black |
 | `DirectionalLight(0xfff4e0, 0.85)` | Sun from the upper-left; casts `PCFShadowMap` shadows on the ground |

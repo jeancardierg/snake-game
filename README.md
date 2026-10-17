@@ -1,6 +1,6 @@
 # Snake — React + Vite
 
-Classic Snake game with endless procedurally generated levels — each with its own identifier, visual theme, obstacle layout, and 8-bit background track — 3D WebGL rendering via three.js, and synthesized 8-bit audio. Built with React + Vite; auto-deployed to GitHub Pages.
+Classic Snake on a 13×13 board with endless procedurally generated levels — each with its own identifier, visual theme, obstacle layout, and 8-bit background track — 3D WebGL rendering via three.js, and synthesized 8-bit audio. The layout fits any screen, from small phones (portrait or landscape) to large desktops. Built with React + Vite; auto-deployed to GitHub Pages.
 
 **Live demo:** https://jeancardierg.github.io/snake-game/
 
@@ -16,6 +16,7 @@ Classic Snake game with endless procedurally generated levels — each with its 
   - [constants.js](#constantsjs)
   - [levels.js](#levelsjs)
   - [pool.js](#pooljs)
+  - [canvasSize.js](#canvassizejs)
   - [audio.js](#audiojs)
   - [music.js](#musicjs)
   - [useSnake.js](#usesnakejs)
@@ -57,23 +58,25 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 
 - **3D WebGL rendering** — a coral-snake body drawn as one continuous, tapered **spline tube** (yellow/red/black scale bands) with a lateral "slither" wave, real-time shadows, directional sun + ambient lighting, and a ground plane recolored per level theme
 - **Animated snake head** — a sleek wedge head with eyes and a periodically flicking forked tongue, oriented along the direction of travel
+- **13×13 board** — odd-sized so the snake spawns on the mirror axis of the symmetric obstacle layouts; up to 169 segments
 - **Endless generated levels** — level *N* is derived deterministically from *N*: speed, theme, music and obstacle layout. The first five keep the original tier names (EASY → MEDIUM → FAST → HYPER → INSANE); progression never ends
 - **Level identity** — every level has a stable id (`L07`) and title (`LEVEL 07 · NEBULA`) shown in the Overlay, in the Scoreboard badge, and in a transient level-up banner over the live board
 - **Per-level visual themes** — 10 hand-authored palettes (ground, sky, grid, lighting, food, walls) that cycle with a hue rotation, applied to the three.js scene in place
-- **Generated obstacle layouts** — 4-way mirrored patterns (pillars, corners, cross, diagonal, ring) that grow denser with level, always validated reachable and always clear of the spawn runway
+- **Generated obstacle layouts** — 4-way mirrored patterns (pillars, corners, cross, diagonal, ring); every level after L01 has walls, the budget grows with level (scaled to board area, capped at ~12% of the board), layouts are always validated reachable and always clear of the spawn runway
+- **Deferred walls** — on a mid-run level-up, walls that would land on the snake or the food are held back and drop in as soon as their cell is clear, never within 2 steps of the head
 - **8-bit background music** — a two-bar chiptune loop per level (square lead, triangle bass, noise percussion), generated from the level seed and synthesized live; can be muted with the 🔊 Music button, and the choice is persisted in `localStorage`
 - **Per-food speed boost** — each food eaten within a level shaves 8 ms off the tick interval, up to a hard floor of 40 ms
 - **Automatic level-up** based on score thresholds derived from a foods-per-level quota
 - **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
 - **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
 - **Wrap-around mode** — optional: the board edges become portals, so the snake leaves one edge and re-enters from the opposite one instead of dying. Toggled with the 🧱 Walls / 🌀 Wrap button before a run or after game over (locked mid-run), persisted in `localStorage`; the edges glow in the level's accent color and the body renders sliding continuously through the portal. Classic walls are the default
-- **Best score** saved in `localStorage` across sessions, tracked separately for classic and wrap mode
-- **High-DPI aware** — WebGL pixel ratio is set to `devicePixelRatio`; the drawing buffer is a fixed 200-unit board scaled to fit the container, so it's sharpest on high-DPI / mobile screens
+- **Best score** saved in `localStorage` across sessions, tracked separately for classic and wrap mode and per board size (records from another grid size don't carry over)
+- **Sharp at any size** — the WebGL drawing buffer follows the canvas's real CSS size × `devicePixelRatio` (capped at 2), so the board renders 1:1 instead of being upscaled; it re-sizes on layout changes, rotation, monitor switches and zoom
 - **Input queue** — up to 2 direction changes buffered at a time (one is consumed per tick), so rapid inputs are never lost
 - **Auto-pause on tab switch** — game pauses when you leave the browser tab
-- **On-screen D-Pad** — 4-button directional pad for mobile, fires on pointer-down (zero latency)
+- **On-screen D-Pad** — 4-button directional pad on touch devices (phones and tablets; hidden where there is a mouse/trackpad), fires on pointer-down (zero latency)
 - **Swipe controls** — swipe gesture support on the game board (20 px threshold)
-- **Full-width mobile layout** — the canvas fills the available width on mobile (capped at 400 px); the surrounding column is capped at 420 px from 900 px up
+- **Fits every screen** — one full-height column: the board is the largest square that fits the space left by the score bar and controls (up to 720 px on desktop), so nothing sits below the fold on small phones; landscape phones switch to board-left / controls-right. Safe-area aware for notches and home bars
 - **Content Security Policy** — CSP meta tag blocks inline scripts and external resources
 - **Accessible** — ARIA labels on D-Pad buttons and canvas, `role="progressbar"` on level bar, focus-visible styles
 
@@ -103,6 +106,7 @@ snake-game/                     # repo root (package name is "snake-react")
 │   ├── test/                   # Vitest unit + hook tests
 │   ├── App.jsx                 # Root component — wires everything together
 │   ├── audio.js                # 8-bit sound effects (Web Audio API)
+│   ├── canvasSize.js           # WebGL drawing-buffer sizing (pure, unit-tested)
 │   ├── constants.js            # Grid dimensions, level curve tunables, input constants
 │   ├── levels.js               # Deterministic infinite level generator (themes, obstacles)
 │   ├── music.js                # 8-bit background music sequencer (Web Audio API)
@@ -129,9 +133,9 @@ App.jsx
   │     ├── headIdxRef    ← head index into the shared segment ring buffer
   │     ├── snakeLenRef   ← live segment count
   │     ├── foodRef       ← current food {x, y}
-  │     ├── obstaclesRef  ← current level's walls: {set, cells}
+  │     ├── obstaclesRef  ← current level's walls: {set, cells, pending, version}
   │     ├── score         ← current score
-  │     ├── best          ← all-time best for the current mode (localStorage)
+  │     ├── best          ← all-time best for the current mode and board size (localStorage)
   │     ├── wrap          ← wrap-around mode on/off (localStorage)
   │     ├── levelIndex    ← current level (unbounded — see levels.js)
   │     ├── banner        ← transient level-up announcement, or null
@@ -217,12 +221,16 @@ Since every food is worth exactly 10 points, "eat N foods to clear the level" an
 
 **Themes.** 10 hand-authored palettes. Past the first cycle each palette is reused with its scene colors (`bg`, `ground`, `grid`, `obstacle`, `fill`) hue-rotated by `37° × cycle`, and the label gains a numeral (`FAST II`, `HYPER III`) — so level 13 is visibly and audibly distinct from level 3. The two light tints (`ambient`, `sun`) and `food` are deliberately left un-rotated, so lighting stays neutral and the mine stays near-black at every cycle.
 
-**Obstacles.** Built from 4-way mirrored groups so layouts read as designed rather than as noise. A group is taken only if it fits entirely within the cell budget and touches no reserved cell; partial groups would break the symmetry.
+**Obstacles.** Built from 4-way mirrored groups so layouts read as designed rather than as noise. A group is taken only if it fits entirely within the cell budget, touches no reserved cell, and keeps the board reachable; partial groups would break the symmetry.
+
+- **Budget** — `obstacleTarget(n)`: 0 on level 0, then `floor(n × 1.2 × area/100)` but never less than one 4-cell group and never more than `MAX_OBSTACLES`. On 13×13: L02–L03 → 4, L06 → 10, L11+ → 20.
+- **Seeds** — base cells come from the top-left quadrant, one cell in from the border. On an even board the quadrant stops before the row that mirrors onto the spawn row (every group there would be rejected); on an odd board the spawn row is the mirror axis itself. Pattern offsets are clamped to the quadrant, so layouts survive a grid resize.
+- **Top-up** — if a pattern falls short of its budget, mirrored pillars from the level's own RNG fill the rest (bounded, deterministic).
 
 Two hard guarantees, both covered by tests over 200 levels:
 
 - **Spawn safety** — no cell on the spawn row within the starting runway (`y === SPAWN_ROW && x <= SPAWN_RUNWAY_X`; on 13×13: row 6, x ≤ 8), so the player can never die before pressing a key. `SPAWN_ROW`, `SPAWN_HEAD_X` and `SPAWN_RUNWAY_X` derive from the grid and `useSnake` builds `INIT_SNAKE` from them.
-- **Reachability** — `isReachable()` flood-fills from the spawn head and requires every free cell to be reachable. On failure the last group is dropped and the check repeats, falling back to an empty board. This is the critical guard: an unreachable pocket would let `randomFood` spawn food the player can never eat, soft-locking the level with no visible error.
+- **Reachability** — `isReachable()` flood-fills from the spawn head and requires every free cell to be reachable. Every group is checked as it is added (a sealing group is skipped and the top-up continues); a defensive final check drops groups on failure, falling back to an empty board. This is the critical guard: an unreachable pocket would let `randomFood` spawn food the player can never eat, soft-locking the level with no visible error.
 
 ---
 
@@ -239,6 +247,19 @@ Pre-allocates `POOL_SIZE = COLS × ROWS = 169` `{x, y}` objects as a circular ri
 | `poolGet(headIdx, i)` | Returns segment at logical index `i` (0 = head) |
 
 `GameCanvas` reads `segPool` directly on every animation frame without triggering any React re-render.
+
+---
+
+### `canvasSize.js`
+
+Pure sizing for the WebGL drawing buffer, kept out of `GameCanvas` so it can be unit-tested without WebGL.
+
+| Export | Description |
+|---|---|
+| `computeCanvasSize(cssW, cssH, dpr)` | Returns `{ width, height, pixelRatio, viewport }`: the canvas's CSS size (rounded, never below 1), the pixel ratio capped at `MAX_PIXEL_RATIO`, and the largest centred square viewport, so a non-square canvas is letterboxed rather than stretched |
+| `MAX_PIXEL_RATIO` | `2` — 3× phones gain nothing visible at this scale, while fill cost grows with the square of the ratio |
+
+`GameCanvas` applies it on mount and from a `ResizeObserver`; the rAF loop re-applies it when `devicePixelRatio` changes, which `ResizeObserver` does not report.
 
 ---
 
@@ -319,7 +340,7 @@ threw without Web Audio would break the whole suite.
 | `best` / `bestRef` | `number` | All-time best for the current mode and board size, persisted in `localStorage` (`snakeBest_13x13` classic, `snakeBestWrap_13x13` wrap). Records from another grid size are not carried over; the 10×10-era keys `snakeBest` / `snakeBestWrap` are removed on load |
 | `wrap` / `wrapRef` | `boolean` | Wrap-around mode, persisted in `localStorage` under `snakeWrap`; changed only via `toggleWrap()` while idle or dead |
 | `levelIndex` / `levelRef` | `number` | Current level index (unbounded — see `levels.js`) |
-| `obstaclesRef` | `{set, cells}` | Current level's wall cells: a `Set` of `x*ROWS+y` keys for O(1) collision checks, plus the matching cell list for `GameCanvas` |
+| `obstaclesRef` | `{set, cells, pending, version}` | Current level's walls: a `Set` of `x*ROWS+y` keys for O(1) collision checks, the matching cell list for `GameCanvas`, layout cells still waiting to be placed (`pending`), and a session-monotonic `version` the renderer re-syncs on |
 | `banner` | `object \| null` | Transient level-up announcement, cleared by a timer |
 | `state` / `stateRef` | `string` | Game state machine value |
 | `dirRef` | `{x,y}` | Direction applied on the last tick |
@@ -365,6 +386,7 @@ head is written into the ring buffer, so a fatal move never mutates `segPool`.
 6. Commits the head via `poolPrepend` and increments `snakeLenRef`.
 7. Food eaten → score +10, best-score update, level-up check, per-food speed boost, new food spawned.
 8. Not food → `snakeLenRef -= 1` (tail slot stays in pool, gets overwritten on the next prepend).
+9. `placePendingObstacles()` drops in any pending walls whose cell is now clear of the snake, the food, the look-ahead and the `HEAD_CLEARANCE` (2-step) radius around the head.
 
 **Per-food speed boost:**
 ```js
@@ -475,7 +497,7 @@ Camera at `(0, 300, 0)` with `up = (0, 0, −1)`: smaller Z → higher on screen
 
 ### `DPad.jsx`
 
-On-screen 4-button directional pad for mobile players.
+On-screen 4-button directional pad for touch devices. Shown wherever the primary pointer is coarse or can't hover (phones, tablets); hidden for mouse/trackpad users via `(hover: hover) and (pointer: fine)` — not by screen width, so tablets and landscape phones keep it. In landscape it sits in the right-hand column beside the board.
 
 - Uses `onPointerDown` (not `onTouchEnd`) — fires on first contact, not finger lift, for zero-latency response
 - `e.preventDefault()` suppresses the trailing synthetic click event
@@ -625,6 +647,8 @@ tick()
  │   │         (the tick's snakeLen++ is kept → body is 1 longer)
  │   └─ NO  → snakeLenRef -= 1  (old tail slot stays, overwritten on next prepend)
  │
+ ├─ Pending walls: place any whose cell is clear (not snake / food / near the head)
+ │
  └─ setScore / setLevel / setState only when those values actually changed —
     snake and food positions never go through React at all
 ```
@@ -693,7 +717,7 @@ Open http://localhost:5173/snake-game/ in your browser.
 | `npm run build` | Build for production into `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
-| `npm test` | Run the Vitest suite once (140 tests across 5 files) |
+| `npm test` | Run the Vitest suite once (175 tests across 6 files) |
 | `npm run test:watch` | Run Vitest in watch mode |
 
 **Jumping to a level.** Append `?level=N` (0-based) to the URL to start on that
@@ -724,9 +748,9 @@ The site updates in ~30 seconds.
 |------|---------|------|
 | React | 19 | UI component model |
 | Vite | 8 | Dev server + build tool |
-| three.js | 0.183 | WebGL 3D renderer |
+| three.js | 0.186 | WebGL 3D renderer |
 | Web Audio API | — | Synthesized 8-bit sound effects + background music |
-| Vitest | 4 | Unit + hook testing (jsdom) |
+| Vitest | 5 | Unit + hook testing (jsdom 30, Testing Library) |
 | GitHub Actions | — | CI/CD (build + audit + deploy) |
 | GitHub Pages | — | Static hosting |
 

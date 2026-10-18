@@ -30,8 +30,8 @@
  *   non-canvas UI (Scoreboard, LevelBar, Overlay, buttons).
  */
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { COLS, ROWS, DIR_QUEUE_MAX, SPEED_PER_FOOD, SPEED_FLOOR } from '../constants';
-import { getLevel, SPAWN_ROW, SPAWN_HEAD_X, SPAWN_RUNWAY_X } from '../levels';
+import { COLS, ROWS, DIR_QUEUE_MAX } from '../constants';
+import { getLevel, speedAfterFoods, SPAWN_ROW, SPAWN_HEAD_X, SPAWN_RUNWAY_X } from '../levels';
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 import { playStart, playEat, playLevelUp, playDeath } from '../audio';
 import { startMusic, stopMusic, pauseMusic, resumeMusic } from '../music';
@@ -453,12 +453,10 @@ export function useSnake() {
         try { localStorage.setItem(bestKey(wrapRef.current), String(newScore)); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
       }
 
-      // Per-food speed boost: each food reduces the tick interval within the level
+      // Per-food speed ramp: each food shortens the tick a little within the level
+      // (relative and capped; see speedAfterFoods / SPEED_RAMP_* in constants.js)
       foodsThisLevelRef.current += 1;
-      const boostedSpeed = Math.max(
-        SPEED_FLOOR,
-        getLevel(levelRef.current).speed - foodsThisLevelRef.current * SPEED_PER_FOOD
-      );
+      const boostedSpeed = speedAfterFoods(levelRef.current, foodsThisLevelRef.current);
 
       // Level-up: while loop handles jumping past multiple thresholds at once.
       // There is no final level — scoreNext is strictly increasing, so the loop

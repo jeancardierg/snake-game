@@ -65,7 +65,7 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 - **Generated obstacle layouts** — 4-way mirrored patterns (pillars, corners, cross, diagonal, ring); every level after L01 has walls, the budget grows with level (scaled to board area, capped at ~12% of the board), layouts are always validated reachable and always clear of the spawn runway
 - **Deferred walls** — on a mid-run level-up, walls that would land on the snake or the food are held back and drop in as soon as their cell is clear, never within 2 steps of the head
 - **8-bit background music** — a two-bar chiptune loop per level (square lead, triangle bass, noise percussion), generated from the level seed and synthesized live; can be muted with the 🔊 Music button, and the choice is persisted in `localStorage`
-- **Per-food speed boost** — each food eaten within a level shaves 8 ms off the tick interval, up to a hard floor of 40 ms
+- **Human-paced speed curve** — levels speed up toward a 100 ms floor (10 moves/s) instead of 40 ms; each food speeds the current level up by 1.5% (at most 15%) and the ramp resets on level-up. Tuned against human reaction time and input latency — see [Speed and human limits](#speed-and-human-limits)
 - **Automatic level-up** based on score thresholds derived from a foods-per-level quota
 - **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
 - **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
@@ -157,7 +157,7 @@ Level data is not part of that flow: `getLevel(n)` in `levels.js` is a pure, mem
 The game loop runs inside a `setInterval`. Because closures capture variables at creation time, a plain `useState` value inside the interval would always read its initial value (stale closure). Every piece of game state that the tick function needs to read or write is mirrored in a `useRef` so it's always current. React state is updated in parallel so the UI re-renders.
 
 **Why a ring buffer?**
-The snake can be up to `COLS × ROWS` = 169 segments long and the game loop runs up to ~25 times per second at the speed floor. Prepending to a JavaScript array every tick causes O(n) memory moves and GC pressure. The ring buffer (`pool.js`) pre-allocates all 169 segment objects once and mutates them in-place — zero allocation per tick regardless of snake length or speed.
+The snake can be up to `COLS × ROWS` = 169 segments long and the game loop runs up to 10 times per second at the speed floor. Prepending to a JavaScript array every tick causes O(n) memory moves and GC pressure. The ring buffer (`pool.js`) pre-allocates all 169 segment objects once and mutates them in-place — zero allocation per tick regardless of snake length or speed.
 
 ---
 
@@ -172,13 +172,14 @@ COLS = 13             // grid width in cells (odd: the spawn row is the obstacle
 ROWS = 13             // grid height in cells
 CELL = 20             // world units per cell (on-screen size comes from the layout)
 BASE_SPEED = 300      // level 0 tick interval in ms
-SPEED_DECAY = 0.9     // speed multiplier applied per level
+SPEED_FLOOR = 100     // asymptote and hard minimum tick interval in ms (10 moves/s)
+SPEED_APPROACH = 0.88 // fraction of (speed − floor) kept per level
 FOODS_BASE = 5        // foods needed to clear level 0
 FOODS_PER_LEVEL = 1.5 // added per level, floored
 FOODS_MAX = 20        // quota plateau
 MAX_OBSTACLES = 20    // hard cap on wall cells per level: ~12% of the board, multiple of 4
-SPEED_PER_FOOD = 8    // ms subtracted from tick interval per food eaten within a level
-SPEED_FLOOR = 40      // minimum tick interval in ms (hard cap)
+SPEED_RAMP_PER_FOOD = 0.015 // 1.5% faster per food eaten within a level
+SPEED_RAMP_MAX = 0.15       // at most 15% faster than the level's base speed
 DIR_QUEUE_MAX = 2     // maximum buffered direction changes
 SWIPE_THRESHOLD = 20  // minimum swipe travel in pixels
 ```
@@ -214,7 +215,8 @@ Deterministic infinite level generator. Level *N* is derived entirely from *N* �
 ```
 foodsForLevel(n) = min(FOODS_MAX, FOODS_BASE + floor(n × FOODS_PER_LEVEL))
 scoreNextFor(n)  = Σ foodsForLevel(0..n) × 10        // strictly increasing
-speedForLevel(n) = max(SPEED_FLOOR, round(BASE_SPEED × SPEED_DECAY^n))
+speedForLevel(n) = round(SPEED_FLOOR + (BASE_SPEED − SPEED_FLOOR) × SPEED_APPROACH^n)   // approaches the floor
+speedAfterFoods(n, k) = max(SPEED_FLOOR, round(speedForLevel(n) × (1 − min(SPEED_RAMP_MAX, k × SPEED_RAMP_PER_FOOD))))
 ```
 
 Since every food is worth exactly 10 points, "eat N foods to clear the level" and "cross score threshold T" are the same mechanism — which is why the engine keeps its original threshold-driven level-up code.
@@ -346,7 +348,7 @@ threw without Web Audio would break the whole suite.
 | `dirRef` | `{x,y}` | Direction applied on the last tick |
 | `dirQueueRef` | `{x,y}[]` | Buffered upcoming directions (max 2) |
 | `speedRef` | `number` | Current tick interval in ms (preserves boost across pause/resume) |
-| `foodsThisLevelRef` | `number` | Foods eaten in current level (drives per-food speed boost) |
+| `foodsThisLevelRef` | `number` | Foods eaten in current level (drives the per-food speed ramp) |
 | `intervalRef` | `number` | ID of the active `setInterval` |
 | `tickRef` | `function` | Latest `tick` closure; the interval calls `tickRef.current()` so it never runs a stale one |
 | `bannerTimerRef` | `number` | ID of the timer that clears `banner` |
@@ -384,14 +386,13 @@ head is written into the ring buffer, so a fatal move never mutates `segPool`.
 4. Obstacle collision (`obstaclesRef.current.set` lookup) → `die()` — a generated wall is as fatal as the board edge.
 5. Self collision → `die()`. Index 0 is skipped (the old head cell can never equal the new one), and when the snake is **not** eating the tail is skipped too: it vacates its cell on this same tick, so moving into it is legal (canonical Snake). When eating, the tail stays put and the full body is checked.
 6. Commits the head via `poolPrepend` and increments `snakeLenRef`.
-7. Food eaten → score +10, best-score update, level-up check, per-food speed boost, new food spawned.
+7. Food eaten → score +10, best-score update, level-up check, per-food speed ramp, new food spawned.
 8. Not food → `snakeLenRef -= 1` (tail slot stays in pool, gets overwritten on the next prepend).
 9. `placePendingObstacles()` drops in any pending walls whose cell is now clear of the snake, the food, the look-ahead and the `HEAD_CLEARANCE` (2-step) radius around the head.
 
-**Per-food speed boost:**
+**Per-food speed ramp:**
 ```js
-const boostedSpeed = Math.max(SPEED_FLOOR,
-  getLevel(level).speed - foodsThisLevel * SPEED_PER_FOOD);
+const boostedSpeed = speedAfterFoods(levelRef.current, foodsThisLevelRef.current);
 ```
 Resets to the new base speed on every level-up. `speedRef` persists the current interval across pause/resume so the boost is not lost.
 
@@ -668,18 +669,33 @@ Tick 2: dequeue ↑  →  snake turns up
 
 Each direction is validated against the *previous queued direction* (not the current snake direction) so that a 180° flip through an intermediate step is still blocked.
 
-### Per-food speed boost
+### Speed and human limits
 
 ```
-speed = max(SPEED_FLOOR, getLevel(level).speed − foodsThisLevel × SPEED_PER_FOOD)
+speed = speedAfterFoods(level, foodsThisLevel)
+      = max(SPEED_FLOOR, round(speedForLevel(level) × (1 − min(15%, foodsThisLevel × 1.5%))))
 ```
 
 | Constant | Value | Effect |
 |----------|-------|--------|
-| `SPEED_PER_FOOD` | 8 ms | Subtracted per food within a level |
-| `SPEED_FLOOR` | 40 ms | Maximum of ~25 ticks/second |
+| `BASE_SPEED` | 300 ms | L01 tick interval |
+| `SPEED_FLOOR` | 100 ms | Asymptote and hard minimum: 10 moves/second |
+| `SPEED_APPROACH` | 0.88 | Fraction of the gap to the floor kept per level |
+| `SPEED_RAMP_PER_FOOD` | 1.5% | Faster per food within a level |
+| `SPEED_RAMP_MAX` | 15% | Cap on the within-level ramp |
 
-The boost accumulates within a level and resets to the new base speed on level-up. `speedRef` persists the current interval across pause/resume so the boost is not lost when pausing.
+**Why a 100 ms floor.** One tick is one cell. A *reactive* input — to food that just spawned or a wall that just dropped in — lands roughly 350 ms after the event on desktop (choice reaction ≈ 300 ms, plus input and display latency) and roughly 430 ms on phones (touch-to-screen latency was measured at 55–120 ms). Dividing by the tick gives the cells the head travels before that input lands:
+
+| Level | Base → end of level | Reaction travel, desktop / touch |
+|---|---|---|
+| L01 | 300 → 282 ms | 1.2 / 1.5 cells |
+| L05 | 220 → 187 ms | 1.9 / 2.3 cells |
+| L10 | 163 → 139 ms | 2.5 / 3.1 cells |
+| L20+ | → 100 ms | 3.5 / 4.3 cells |
+
+The previous curve (−8 ms per food, up to 19 foods per level, 40 ms floor) ended L06 at 89 ms and **every level from L08 at 40 ms** — 8.8 cells of reaction travel on desktop, and too short a window to place a turn on the intended cell reliably. Tests in `gameLogic.test.js` now assert the limits: no level faster than 100 ms, at most 3.5 cells of desktop reaction travel at any level, at most 2 cells for L01–L05.
+
+The ramp accumulates within a level and resets to the new base speed on level-up. `speedRef` persists the current interval across pause/resume so the ramp is not lost when pausing.
 
 ### Level-up
 

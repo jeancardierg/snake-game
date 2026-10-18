@@ -16,10 +16,21 @@ export const CELL = 20;          // world units per cell
 // ("survival"): getLevel(n) is defined for every n, and useSnake advances when
 // the score crosses the current level's threshold.
 //
-// Speed decays geometrically from BASE_SPEED and is clamped at SPEED_FLOOR,
-// so the curve is monotonic and the level-up loop always terminates.
-export const BASE_SPEED  = 300;   // level 0 tick interval in ms
-export const SPEED_DECAY = 0.9;   // multiplier applied per level
+// Speed approaches SPEED_FLOOR geometrically: each level keeps SPEED_APPROACH
+// of the remaining gap, so the curve is strictly decreasing, never goes below
+// the floor, and flattens as it nears it (difficulty past ~L20 comes from walls
+// and snake length, not raw speed).
+//
+// The floor is set by human limits, not by what the code can do. A tick is one
+// cell, and a reactive input (food just spawned, a wall just dropped in) lands
+// ~350 ms after the event on desktop (choice reaction ~300 ms + input/display
+// path) and ~430 ms on phones (touch latency measured at 55–120 ms). At 100 ms
+// the snake travels ~3.5 cells (desktop) / ~4.3 cells (touch) before such an
+// input lands — hard but humanly playable. The old 40 ms floor (25 moves/s) was
+// 8.8 / 10.8 cells, and most turns could not be timed onto the intended cell.
+export const BASE_SPEED     = 300;   // level 0 tick interval in ms
+export const SPEED_FLOOR    = 100;   // asymptote and hard minimum for the whole curve (ms)
+export const SPEED_APPROACH = 0.88;  // fraction of (speed − floor) kept per level
 
 // Foods required to clear a level: FOODS_BASE + n * FOODS_PER_LEVEL, capped.
 // Every food is worth 10 points, so this doubles as the score threshold curve.
@@ -33,12 +44,14 @@ export const FOODS_MAX       = 20;
 // cap is rounded down to a multiple of 4 to stay reachable. 13×13 → 20.
 export const MAX_OBSTACLES = Math.max(4, Math.floor((COLS * ROWS * 0.12) / 4) * 4);
 
-// ─── Per-food speed tuning ────────────────────────────────────────────────────
-// Each food eaten within a level reduces the tick interval by SPEED_PER_FOOD ms,
-// resetting to the new level's base speed on every level-up.
-// SPEED_FLOOR is a hard minimum to prevent the interval reaching unusable values.
-export const SPEED_PER_FOOD = 8;   // ms subtracted per food eaten within a level
-export const SPEED_FLOOR    = 40;  // minimum interval in ms (floor for the whole curve)
+// ─── Per-food speed ramp ──────────────────────────────────────────────────────
+// Each food eaten within a level speeds the tick up by a fraction of that
+// level's base speed, capped, and resets on every level-up (a breather).
+// Relative and capped on purpose: the old flat −8 ms per food with up to 19
+// foods per level could take a level from 177 ms to the 40 ms floor before it
+// ended (L06), which no human can track.
+export const SPEED_RAMP_PER_FOOD = 0.015;  // 1.5% faster per food this level
+export const SPEED_RAMP_MAX      = 0.15;   // at most 15% faster than the level's base
 
 // ─── Input constants ──────────────────────────────────────────────────────────
 // Minimum pixel travel for a touch to register as a directional swipe.

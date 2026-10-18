@@ -28,6 +28,7 @@ import { COLS, ROWS, CELL, MAX_OBSTACLES } from '../constants';
 import { getLevel } from '../levels';
 import { segPool, POOL_SIZE } from '../pool';
 import { computeCanvasSize, MAX_PIXEL_RATIO } from '../canvasSize';
+import { shadowHalfExtent } from '../shadowFit';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
@@ -251,9 +252,11 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     const sun = new THREE.DirectionalLight(0xfff4e0, 0.85);
     sun.position.set(-80, 180, -60);
     sun.castShadow = true;
-    // Shadow frustum covers the whole board plus a margin for the offset sun,
-    // derived from the board size (it was a fixed ±120, sized for 10×10).
-    const SHADOW_HALF = HALF + CELL;
+    // Shadow box: the shadow camera looks along the (tilted) light direction, so
+    // its box must cover the board's corners as seen from the light, not just
+    // its half-width — otherwise shadows are cut diagonally at all four corners.
+    // shadowHalfExtent projects the board volume onto the light's view.
+    const SHADOW_HALF = shadowHalfExtent(HALF, CELL, sun.position, CELL / 2);
     sun.shadow.camera.left   = -SHADOW_HALF;
     sun.shadow.camera.right  =  SHADOW_HALF;
     sun.shadow.camera.top    =  SHADOW_HALF;

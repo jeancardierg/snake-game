@@ -107,6 +107,8 @@ snake-game/                     # repo root (package name is "snake-react")
 │   ├── App.jsx                 # Root component — wires everything together
 │   ├── audio.js                # 8-bit sound effects (Web Audio API)
 │   ├── canvasSize.js           # WebGL drawing-buffer sizing (pure, unit-tested)
+│   ├── shadowFit.js            # Sun shadow-box fit to the board (pure, unit-tested)
+│   ├── snakeProfile.js         # Head/neck dimensions and neck profile (pure, unit-tested)
 │   ├── constants.js            # Grid dimensions, level curve tunables, input constants
 │   ├── levels.js               # Deterministic infinite level generator (themes, obstacles)
 │   ├── music.js                # 8-bit background music sequencer (Web Audio API)
@@ -465,9 +467,10 @@ run into a wall that just appeared. Until then the two layouts legitimately diff
 
 The snake body is **one continuous tube**, not a chain of spheres:
 
-- **Body**: a single `BufferGeometry` of fixed capacity, rebuilt in place every frame (`setDrawRange` controls the live length — no per-frame allocation). A Catmull-Rom spline is fit through the interpolated segment centers and sampled into rings; the tube **tapers** neck → tail and carries a lateral **slither wave** whose amplitude ramps from 0 at the head so the head stays grid-accurate. The coral-snake **scale texture** (yellow → red → yellow → black bands, built by `makeSnakeBodyTexture`) repeats along the length.
+- **Body**: a single `BufferGeometry` of fixed capacity, rebuilt in place every frame (`setDrawRange` controls the live length — no per-frame allocation). A Catmull-Rom spline is fit through the interpolated segment centers and sampled into rings; the tube **tapers** neck → tail and carries a lateral **slither wave** whose amplitude ramps from 0 at the head so the head stays grid-accurate. The coral-snake **scale texture** (yellow → red → yellow → black bands, built by `makeSnakeBodyTexture`) repeats along the length, laid out by distance so the yellow collar starts exactly where the neck leaves the head.
+- **Neck** (`snakeProfile.js`): the tube starts thin and low *inside* the head (`NECK_R` ≈ 62% of body radius, resting on the ground) and widens to full body radius over `NECK_LEN` (1.1 cells), so the body emerges from under the back of the head (`NECK_EXIT` ≈ 9 units behind its centre) instead of cutting across it. Unit-tested against the head ellipsoid.
 - **Head**: a scaled `SphereGeometry` wedge (slim, elongated, `−Z` = forward) with two eyes (gold sphere + black pupil) and a **forked tongue** that flicks periodically while running — all parented to the head so they move and rotate with it.
-- **Head direction**: `headMesh.rotation.y = atan2(−ndx, −ndz)` from the head→neck vector each frame (the snout faces `−Z`).
+- **Head direction**: follows the body spline — the direction from a point half a cell down the neck to the head (`headDir`, set by the tube builder) — so the head turns smoothly with the body through corners instead of snapping 90°. `rotation.y = atan2(−dx, −dz)` (the snout faces `−Z`).
 - **Head interpolation**: measures the real tick interval, sets `interpDuration = measured × 0.92` (clamped 40–400 ms), and smoothstep-interpolates the head between grid cells each rAF frame for fluid movement.
 - **Wrap mode**: grid deltas are normalised to the shortest way round the board (`wrapDelta`), and the centerline is **unwrapped** — each point is shifted by whole boards to sit next to its predecessor, so the path stays continuous off the board edge. The tube is built once along that path; for every other board-sized tile the path touches, a copy mesh sharing the tube's buffers is drawn shifted back onto the board (three head clones do the same for the head). The orthographic frustum is exactly the board, so the off-board part of every copy is cut away for free — no clipping planes. Four additive glow strips mark the portal edges, tinted with the level's accent color and pulsing while visible.
 
@@ -733,7 +736,7 @@ Open http://localhost:5173/snake-game/ in your browser.
 | `npm run build` | Build for production into `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
-| `npm test` | Run the Vitest suite once (175 tests across 6 files) |
+| `npm test` | Run the Vitest suite once (195 tests across 8 files) |
 | `npm run test:watch` | Run Vitest in watch mode |
 
 **Jumping to a level.** Append `?level=N` (0-based) to the URL to start on that

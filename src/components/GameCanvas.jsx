@@ -29,6 +29,7 @@ import { getLevel } from '../levels';
 import { segPool, POOL_SIZE } from '../pool';
 import { computeCanvasSize, MAX_PIXEL_RATIO } from '../canvasSize';
 import { shadowHalfExtent } from '../shadowFit';
+import { BODY_R, HEAD_R, HEAD_Y, HEAD_SCALE, NECK_EXIT, neckProfile } from '../snakeProfile';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
@@ -339,10 +340,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     scene.add(portal);
 
     // ── Snake dimensions / materials ──────────────────────────────────────────
-    const BODY_R   = CELL * 0.34;   // max tube radius (neck)
-    const HEAD_R   = CELL * 0.44;
+    // BODY_R / HEAD_R / HEAD_Y / HEAD_SCALE come from snakeProfile.js, which
+    // also shapes the neck so the body emerges from under the head.
     const CENTER_Y = BODY_R;        // tube centerline height → rests on ground
-    const HEAD_Y   = HEAD_R * 0.75;
 
     const bodyTex = makeSnakeBodyTexture();
     const headTex = makeSnakeHeadTexture();
@@ -428,10 +428,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     const scP         = new THREE.Vector3();
     const bx          = new Float32Array(MAX_RINGS);   // base sample X (pre-slither)
     const bz          = new Float32Array(MAX_RINGS);   // base sample Z (pre-slither)
+    const bd          = new Float32Array(MAX_RINGS);   // distance of each sample behind the head
+    const headDir     = { x: 0, z: -1 };                // smoothed travel direction at the head
 
     // ── Head mesh (sleek elongated wedge) + eyes + tongue ─────────────────────
     const headGeo = new THREE.SphereGeometry(HEAD_R, 24, 18);
-    headGeo.scale(0.9, 0.66, 1.35);   // slim, flattened, elongated snout (−Z forward)
+    headGeo.scale(HEAD_SCALE.x, HEAD_SCALE.y, HEAD_SCALE.z);   // slim, flattened, elongated snout (−Z forward)
     const headMesh = new THREE.Mesh(headGeo, headMat);
     headMesh.castShadow = true;
     scene.add(headMesh);
@@ -541,11 +543,17 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     // and writes positions/normals/uvs in place. `ulen` scales scale-banding
     // along the body length.
     const buildTube = (N, slitherT, ulen) => {
-      // Pass 1: base centerline samples (pre-slither) in XZ
+      // Pass 1: base centerline samples (pre-slither) in XZ, plus the distance
+      // of each sample behind the head (drives the neck profile).
       for (let i = 0; i < N; i++) {
         curve.getPoint(i / (N - 1), scP);
         bx[i] = scP.x; bz[i] = scP.z;
+        bd[i] = i === 0 ? 0 : bd[i - 1] + Math.hypot(bx[i] - bx[i - 1], bz[i] - bz[i - 1]);
       }
+      // Bands are laid out by distance and start where the neck leaves the head,
+      // so the yellow collar sits right behind the head (the part inside the
+      // head wraps to the black band, unseen). Same band density as before.
+      const uPerUnit = ulen / (bd[N - 1] || 1);
       // Pass 2: tangent → perpendicular → slither offset → ring of RAD verts
       for (let i = 0; i < N; i++) {
         const s  = i / (N - 1);
@@ -562,9 +570,14 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
         const cx  = bx[i] + px * off;
         const cz  = bz[i] + pz * off;
 
-        // Radius: taper neck→tail, round the very tip to a point
+        // Radius: taper neck→tail, round the very tip to a point; near the head
+        // the neck profile narrows and lowers the tube so it starts inside the
+        // head and emerges from under its back instead of cutting across it.
         let R = BODY_R * (1 - 0.72 * s);
         R *= Math.min(1, (1 - s) / 0.06);
+        const neck = neckProfile(bd[i], R);
+        R = neck.r;
+        const cy = neck.y + (CENTER_Y - BODY_R);   // = neck.y; kept explicit if CENTER_Y changes
 
         const base = i * RAD;
         for (let j = 0; j < RAD; j++) {
@@ -573,14 +586,19 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
           const nx = ct * px, ny = st, nz = ct * pz;   // radial (= normal) dir
           const vi = (base + j) * 3;
           tPos[vi]     = cx + nx * R;
-          tPos[vi + 1] = CENTER_Y + ny * R;
+          tPos[vi + 1] = cy + ny * R;
           tPos[vi + 2] = cz + nz * R;
           tNor[vi]     = nx; tNor[vi + 1] = ny; tNor[vi + 2] = nz;
           const ui = (base + j) * 2;
-          tUv[ui]     = s * ulen;
+          tUv[ui]     = (bd[i] - NECK_EXIT) * uPerUnit;
           tUv[ui + 1] = j / RAD;
         }
       }
+      // Head heading: from a point ~half a cell down the neck to the head, so
+      // the head turns smoothly with the body instead of snapping 90°.
+      let hi = 1; while (hi < N - 1 && bd[hi] < CELL * 0.5) hi++;
+      headDir.x = bx[0] - bx[hi]; headDir.z = bz[0] - bz[hi];
+
       bodyGeom.attributes.position.needsUpdate = true;
       bodyGeom.attributes.normal.needsUpdate   = true;
       bodyGeom.attributes.uv.needsUpdate        = true;
@@ -764,18 +782,11 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       // ── Head placement + orientation ────────────────────────────────────────
       const hwp = cellToWorld(hxF, hyF, HEAD_Y);
       headMesh.position.set(hwp.x, hwp.y, hwp.z);
-      if (snakeLen > 1) {
-        const neck = segPool[(headIdx + 1) % POOL_SIZE];
-        const dx   = head.x - neck.x;
-        const dz   = head.y - neck.y;
-        const ndx  = Math.abs(dx) > 1 ? -Math.sign(dx) : dx;
-        const ndz  = Math.abs(dz) > 1 ? -Math.sign(dz) : dz;
-        if (ndx !== 0 || ndz !== 0) {
-          // Head geometry faces −Z (eyes + tongue on the −Z snout), so the snout
-          // points along the travel vector (ndx,ndz) only at atan2(−ndx,−ndz);
-          // plain atan2(ndx,ndz) aims it 180° backward.
-          headMesh.rotation.y = Math.atan2(-ndx, -ndz);
-        }
+      if (snakeLen > 1 && (headDir.x !== 0 || headDir.z !== 0)) {
+        // Follow the neck's smoothed direction (set by buildTube) so the head
+        // turns with the body. Head geometry faces −Z (eyes + tongue on the −Z
+        // snout), so the snout points along (dx,dz) at atan2(−dx,−dz).
+        headMesh.rotation.y = Math.atan2(-headDir.x, -headDir.z);
       }
 
       // Tongue flick: extend for ~180ms roughly every 1.6s while running

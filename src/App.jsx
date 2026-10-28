@@ -29,7 +29,8 @@ import { Overlay } from './components/Overlay';
 import { DPad } from './components/DPad';
 import { DIR, SWIPE_THRESHOLD } from './constants';
 import { isMusicEnabled, setMusicEnabled } from './music';
-import { loadLoadout, saveLoadout } from './cosmetics/loadout';
+import { Wardrobe } from './components/Wardrobe';
+import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import './index.css';
 
 export default function App() {
@@ -54,15 +55,24 @@ export default function App() {
     setMusicOn(next);
   }, []);
 
-  // ── Cosmetics (pause menu → Customize) ──────────────────────────────────────
-  const [loadout, setLoadout] = useState(loadLoadout);
-  const changeLoadout = useCallback((slot, id) => {
-    setLoadout((prev) => {
-      const next = { ...prev, [slot]: id };
-      saveLoadout(next);
-      return next;
-    });
-  }, []);
+  // ── Cosmetics (Customize menu) ──────────────────────────────────────────────
+  // `saved` is what's stored on the device; `draft` is the menu's working copy
+  // (null when the menu is closed). The board shows the draft while the menu is
+  // open; only Save makes it stick.
+  const [saved, setSaved] = useState(loadLoadout);
+  const [draft, setDraft] = useState(null);
+  const editing = draft !== null && state !== 'running';
+  const loadout = editing ? draft : saved;
+  const openWardrobe = useCallback(() => {
+    if (state === 'running') pause();
+    setDraft({ ...saved });
+  }, [state, pause, saved]);
+  const closeWardrobe = useCallback(() => setDraft(null), []);
+  const changeDraft   = useCallback((slot, id) => setDraft((d) => ({ ...d, [slot]: id })), []);
+  const shuffleDraft  = useCallback(() => setDraft(randomLoadout()), []);
+  const saveDraft     = useCallback(() => { saveLoadout(draft); setSaved(draft); }, [draft]);
+  const resumeFromWardrobe = useCallback(() => { setDraft(null); pause(); }, [pause]);
+  const dirty = editing && Object.keys(saved).some((k) => saved[k] !== draft[k]);
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
   // Track where each touch started. Using a ref so the handlers are stable
@@ -148,11 +158,24 @@ export default function App() {
             banner={banner}
             onReset={reset}
             onPause={pause}
-            loadout={loadout}
-            onLoadout={changeLoadout}
+            onCustomize={openWardrobe}
           />
         </div>
       </div>
+
+      {/* Customize menu: full-screen dialog over everything */}
+      {editing && (
+        <Wardrobe
+          loadout={draft}
+          levelIndex={levelIndex}
+          dirty={dirty}
+          onChange={changeDraft}
+          onShuffle={shuffleDraft}
+          onSave={saveDraft}
+          onClose={closeWardrobe}
+          onResume={state === 'paused' ? resumeFromWardrobe : null}
+        />
+      )}
 
       {/* Mobile D-Pad (hidden on desktop via CSS media query) */}
       <DPad onDir={applyDir} levelIndex={levelIndex} />
@@ -172,6 +195,7 @@ export default function App() {
         >
           {musicOn ? '🔊 Music' : '🔇 Music'}
         </button>
+        <button className="ctrl-btn" onClick={openWardrobe}>🎨 Customize</button>
         <button
           className="ctrl-btn"
           onClick={toggleWrap}

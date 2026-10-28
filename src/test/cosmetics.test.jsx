@@ -7,9 +7,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Group } from 'three';
-import { SLOTS, DEFAULT_LOADOUT, LOADOUT_KEY, sanitizeLoadout, loadLoadout, saveLoadout, findItem } from '../cosmetics/loadout';
+import { SLOTS, DEFAULT_LOADOUT, LOADOUT_KEY, sanitizeLoadout, loadLoadout, saveLoadout, findItem, randomLoadout } from '../cosmetics/loadout';
 import { FX } from '../cosmetics/boards';
 import { Overlay } from '../components/Overlay';
+import { Wardrobe } from '../components/Wardrobe';
 
 describe('cosmetics catalog', () => {
   it('has unique ids and a name for every item', () => {
@@ -59,54 +60,88 @@ describe('loadout persistence', () => {
     expect(loadLoadout()).toEqual(picked);
   });
 
+  it('shuffles to valid ids in every slot', () => {
+    let seed = 0;
+    for (let i = 0; i < 20; i++) {
+      const l = randomLoadout(() => (seed = (seed + 0.37) % 1));
+      expect(sanitizeLoadout(l)).toEqual(l);
+    }
+  });
+
   it('falls back to the default on corrupt storage', () => {
     localStorage.setItem(LOADOUT_KEY, '{not json');
     expect(loadLoadout()).toEqual(DEFAULT_LOADOUT);
   });
 });
 
-describe('pause menu Customize', () => {
-  const paused = (props = {}) => render(
-    <Overlay state="paused" score={0} levelIndex={0} banner={null} onPause={vi.fn()} loadout={DEFAULT_LOADOUT} onLoadout={vi.fn()} {...props} />,
-  );
-
-  it('opens the wardrobe from the pause screen and back', () => {
-    paused();
+describe('pause menu Customize button', () => {
+  it('opens the menu from the pause screen', () => {
+    const onCustomize = vi.fn();
+    render(<Overlay state="paused" score={0} levelIndex={0} banner={null} onPause={vi.fn()} onCustomize={onCustomize} />);
     fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    expect(screen.getByText('CUSTOMIZE')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Skins' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.getByText('PAUSED')).toBeInTheDocument();
+    expect(onCustomize).toHaveBeenCalledTimes(1);
   });
 
-  it('marks the current picks and reports new ones', () => {
-    const onLoadout = vi.fn();
-    paused({ loadout: { ...DEFAULT_LOADOUT, skin: 'bone' }, onLoadout });
-    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+  it('hides Customize when no handler is wired in', () => {
+    render(<Overlay state="paused" score={0} levelIndex={0} banner={null} />);
+    expect(screen.queryByRole('button', { name: 'Customize' })).toBeNull();
+  });
+});
+
+describe('Wardrobe', () => {
+  const open = (props = {}) => {
+    const handlers = { onChange: vi.fn(), onShuffle: vi.fn(), onSave: vi.fn(), onClose: vi.fn(), onResume: vi.fn() };
+    render(<Wardrobe loadout={DEFAULT_LOADOUT} levelIndex={0} dirty={false} {...handlers} {...props} />);
+    return handlers;
+  };
+
+  it('marks the current picks and reports new ones per tab', () => {
+    const { onChange } = open({ loadout: { ...DEFAULT_LOADOUT, skin: 'bone' } });
     expect(screen.getByRole('button', { name: /Bone Rattler/ })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: /Easter Egg/ }));
-    expect(onLoadout).toHaveBeenCalledWith('skin', 'egg');
+    expect(onChange).toHaveBeenCalledWith('skin', 'egg');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Accessories' }));
     fireEvent.click(screen.getByRole('button', { name: /Witch Hat/ }));
-    expect(onLoadout).toHaveBeenCalledWith('hat', 'witch');
+    expect(onChange).toHaveBeenCalledWith('hat', 'witch');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Board' }));
     expect(screen.getByRole('button', { name: /Level Theme/ })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: /Graveyard/ }));
-    expect(onLoadout).toHaveBeenCalledWith('board', 'graveyard');
+    expect(onChange).toHaveBeenCalledWith('board', 'graveyard');
   });
 
-  it('resumes straight from the wardrobe', () => {
-    const onPause = vi.fn();
-    paused({ onPause });
-    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    expect(onPause).toHaveBeenCalledTimes(1);
+  it('offers Save only with unsaved picks, and says Discard instead of Close', () => {
+    open();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
-  it('hides Customize when no loadout is wired in', () => {
-    render(<Overlay state="paused" score={0} levelIndex={0} banner={null} />);
-    expect(screen.queryByRole('button', { name: 'Customize' })).toBeNull();
+  it('saves, shuffles and discards', () => {
+    const h = open({ dirty: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Shuffle' }));
+    expect(h.onShuffle).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(h.onSave).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Saved ✓' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(h.onClose).toHaveBeenCalled();
+  });
+
+  it('keeps game keys away from the game and closes on Escape', () => {
+    const h = open();
+    const gameKey = vi.fn();
+    window.addEventListener('keydown', gameKey);
+    fireEvent.keyDown(window, { key: 'p' });
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    expect(gameKey).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(h.onClose).toHaveBeenCalled();
+    window.removeEventListener('keydown', gameKey);
+  });
+
+  it('shows Resume only when there is a paused game', () => {
+    open({ onResume: null });
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
   });
 });

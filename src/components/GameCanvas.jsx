@@ -15,6 +15,8 @@
  *   - Point-light flash on eat, particle burst, camera shake on death
  *   - Wrap mode: pulsing portal glow on the board edges, and a snake that slides
  *     through one edge and out of the opposite one (see "Wrap rendering" below)
+ *   - Cosmetics from the pause menu (see cosmetics/): body skin, hat on the
+ *     head, tail decoration, and a board look that can replace the level theme
  *
  * All game state is read from refs every frame (no React reconciliation per tick).
  * The three.js scene is created once on mount and torn down on unmount.
@@ -32,6 +34,9 @@ import { computeCanvasSize, MAX_PIXEL_RATIO } from '../canvasSize';
 import { shadowHalfExtent } from '../shadowFit';
 import { BODY_R, HEAD_R, HEAD_Y, HEAD_SCALE, NECK_EXIT, neckProfile } from '../snakeProfile';
 import { filletRadii, samplePath, slitherOffset, SLITHER_AMP } from '../snakePath';
+import { paintSkin } from '../cosmetics/skins';
+import { FX, paintGround } from '../cosmetics/boards';
+import { DEFAULT_LOADOUT, findItem } from '../cosmetics/loadout';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
@@ -183,7 +188,7 @@ function makeSnakeHeadTexture() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, levelIndex, stateRef, wrap = false }) {
+export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, levelIndex, stateRef, wrap = false, loadout = DEFAULT_LOADOUT }) {
   const canvasRef = useRef(null);
   const color     = getLevel(Math.max(levelIndex ?? 0, 0)).color;
 
@@ -194,6 +199,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
   // The theme effect below recolors these in place rather than rebuilding the
   // scene — teardown/rebuild would re-run the full disposal path every level.
   const sceneRef = useRef(null);
+
+  // Cosmetic state the rAF loop reads (the item objects, not just ids).
+  const cosRef = useRef({ skin: null, tail: null, tailObj: null, fx: null });
 
   const animRef = useRef({
     prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1,
@@ -447,6 +455,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     const eyeMat   = new THREE.MeshPhongMaterial({ color: 0xf2d21a, emissive: new THREE.Color(0x352600), shininess: 90 });
     const pupilGeo = new THREE.SphereGeometry(1.05, 8, 6);
     const pupilMat = new THREE.MeshBasicMaterial({ color: 0x060606 });
+    // Dark eye sockets, shown only by skins that ask for them (Bone Rattler).
+    const socketGeo = new THREE.SphereGeometry(3.3, 12, 9);
+    const socketMat = new THREE.MeshPhongMaterial({ color: 0x000000, shininess: 10 });
     for (const s of [-1, 1]) {
       const eye   = new THREE.Mesh(eyeGeo, eyeMat);
       const pupil = new THREE.Mesh(pupilGeo, pupilMat);
@@ -454,7 +465,18 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       pupil.position.set(0, 0, eyeGeo.parameters.radius * 0.85);
       eye.add(pupil);
       headMesh.add(eye);
+      const socket = new THREE.Mesh(socketGeo, socketMat);
+      socket.position.copy(eye.position).add(new THREE.Vector3(s * 0.3, 0.2, 0.7));
+      socket.name    = 'socket';
+      socket.visible = false;
+      headMesh.add(socket);
     }
+
+    // Hat mount on the crown of the head (hats face −Z like the head).
+    const hatAnchor = new THREE.Group();
+    hatAnchor.position.set(0, HEAD_R * HEAD_SCALE.y * 0.82, 1.6);
+    hatAnchor.name = 'hat';
+    headMesh.add(hatAnchor);
 
     // Flicking forked tongue (parented to head, extends from the snout tip)
     const tongueMat  = new THREE.MeshBasicMaterial({ color: 0xd11a2a });
@@ -484,6 +506,72 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       scene.add(mesh);
       headGhosts.push({ mesh, tongue: mesh.getObjectByName('tongue') });
     }
+    // Every head (board + wrap copies) with its hat mount, for the cosmetics effects.
+    const heads = [headMesh, ...headGhosts.map((g) => g.mesh)];
+    const hatAnchors = heads.map((h) => h.getObjectByName('hat'));
+
+    // ── Tail decoration + followers (placed each frame at the tail tip) ───────
+    const tailAnchor = new THREE.Group();
+    const follower   = new THREE.Group();
+    scene.add(tailAnchor, follower);
+
+    // Round sprite shared by the stardust trail and weather layers.
+    const dotTex = (() => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 32;
+      const ctx = c.getContext('2d');
+      const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+      g.addColorStop(0, '#fff'); g.addColorStop(0.45, 'rgba(255,255,255,0.8)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 32);
+      return new THREE.CanvasTexture(c);
+    })();
+
+    // Stardust trail: a ring buffer of points, faded by darkening (additive).
+    const SD = 160;
+    const sdPos = new Float32Array(SD * 3), sdCol = new Float32Array(SD * 3);
+    const sdLife = new Float32Array(SD), sdHue = new Float32Array(SD);
+    const sdGeo = new THREE.BufferGeometry();
+    sdGeo.setAttribute('position', new THREE.BufferAttribute(sdPos, 3));
+    sdGeo.setAttribute('color',    new THREE.BufferAttribute(sdCol, 3));
+    const stardust = new THREE.Points(sdGeo, new THREE.PointsMaterial({
+      size: 6, map: dotTex, vertexColors: true, sizeAttenuation: false,
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    stardust.frustumCulled = false;
+    stardust.visible = false;
+    scene.add(stardust);
+    let sdNext = 0;
+
+    // Weather layer for the chosen board (FX in cosmetics/boards.js).
+    const WX = 200;
+    const wxPos = new Float32Array(WX * 3), wxVel = new Float32Array(WX * 3), wxCol = new Float32Array(WX * 3);
+    const wxGeo = new THREE.BufferGeometry();
+    wxGeo.setAttribute('position', new THREE.BufferAttribute(wxPos, 3));
+    wxGeo.setAttribute('color',    new THREE.BufferAttribute(wxCol, 3));
+    const wxMat = new THREE.PointsMaterial({ size: 4, map: dotTex, vertexColors: true, sizeAttenuation: false, transparent: true, depthWrite: false });
+    const weather = new THREE.Points(wxGeo, wxMat);
+    weather.frustumCulled = false;
+    weather.visible = false;
+    scene.add(weather);
+    const setWeather = (fx) => {
+      cosRef.current.fx = fx;
+      weather.visible = !!fx;
+      if (!fx) return;
+      let seed = 42;
+      const r = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      wxMat.blending = fx.add ? THREE.AdditiveBlending : THREE.NormalBlending;
+      wxMat.size = fx.size + 1;
+      wxMat.needsUpdate = true;
+      for (let i = 0; i < WX; i++) {
+        tmpColor.set(fx.cols[i % fx.cols.length]);
+        wxCol.set([tmpColor.r, tmpColor.g, tmpColor.b], i * 3);
+        if (i >= fx.n) { wxPos.set([0, -999, 0], i * 3); continue; }
+        wxPos.set([(r() - 0.5) * SIZE, r() * fx.area, (r() - 0.5) * SIZE], i * 3);
+        wxVel.set(fx.spawn(r), i * 3);
+      }
+      wxGeo.attributes.position.needsUpdate = true;
+      wxGeo.attributes.color.needsUpdate    = true;
+    };
 
     // ── Mine mesh (food) ──────────────────────────────────────────────────────
     const MINE_R = CELL * 0.35;
@@ -608,6 +696,10 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       scene, groundMat, gridMat, ambient, sun, fill,
       mineMat, obstacleMat,
       portal, portalMat,
+      // cosmetics
+      bodyMat, headMat, eyeMat, bodyTex, headTex, heads, hatAnchors,
+      tailAnchor, follower, stardust, setWeather,
+      texCache: new Map(),   // skin id / 'ground:<board id>' → textures
     };
 
     // ── Obstacle instances ───────────────────────────────────────────────────
@@ -633,6 +725,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     // ── rAF loop ──────────────────────────────────────────────────────────────
     let stopped = false;
     let rafId;
+    let tubeRings = 0;                     // rings in the current tube (tail placement)
+    const scratch = new THREE.Vector3();
 
     const loop = () => {
       if (stopped) return;
@@ -760,8 +854,10 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
         const N = Math.max(2, Math.min(MAX_RINGS, Math.ceil(anim.visLen / RING_STEP) + 1));
         buildTube(N, anim.visLen, hDist, headAbs, nV);
         bodyMesh.visible = true;
+        tubeRings = N;
       } else {
         bodyMesh.visible = false;
+        tubeRings = 0;
       }
 
       // Body copies: tile (kx,kz) of the unwrapped path is shown on the board by
@@ -822,6 +918,79 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       }
       for (let i = headsUsed; i < headGhosts.length; i++) headGhosts[i].mesh.visible = false;
 
+      // ── Cosmetics ─────────────────────────────────────────────────────────
+      const cos   = cosRef.current;
+      const clock = now / 1000;
+      if (cos.skin?.scroll && bodyMat.map) bodyMat.map.offset.x = (bodyMat.map.offset.x - dt / 1000 * cos.skin.scroll) % 1;
+      if (cos.skin?.glowPulse) bodyMat.emissiveIntensity = 0.75 + 0.35 * Math.sin(clock * 3.2);
+      for (const a of hatAnchors) {
+        const ring = a.getObjectByName('halo-ring');
+        if (ring) ring.position.y = 9 + Math.sin(clock * 2.4) * 0.9;
+      }
+
+      // Tail decoration sits ~5 units in from the tip, facing away from the body.
+      const tailOn = bodyMesh.visible && cos.tailObj !== null && tubeRings >= 3;
+      tailAnchor.visible = follower.visible = tailOn;
+      if (tailOn) {
+        const N  = tubeRings;
+        const j  = Math.min(N - 1, Math.max(1, Math.round((anim.visLen - 5) / anim.visLen * (N - 1))));
+        let dx = bx[j] - bx[j - 1], dz = bz[j] - bz[j - 1];
+        const dl = Math.hypot(dx, dz) || 1;
+        dx /= dl; dz /= dl;
+        // Unwrapped (wrap mode) coordinates are folded back onto the board.
+        const fold = (v) => (wrap ? ((((v + HALF) % SIZE) + SIZE) % SIZE) - HALF : v);
+        const yaw  = Math.atan2(dx, dz);
+        tailAnchor.position.set(fold(bx[j]), 2, fold(bz[j]));
+        tailAnchor.rotation.y = yaw;
+        const u = cos.tailObj.userData;
+        if (u.shake)   cos.tailObj.rotation.y = Math.sin(clock * 48) * 0.16 * (Math.sin(clock * 0.9) > 0.2 ? 1 : 0.15);
+        if (u.swing)   u.swing.rotation.x = Math.sin(clock * 6) * 0.35;
+        if (u.flicker) u.flicker.forEach((m, i) => { const f = 0.85 + Math.sin(clock * (17 + i * 5) + i) * 0.12 + Math.random() * 0.06; m.scale.set(f, f * (1 + i * 0.05), f); });
+        if (u.spin)    u.spin.rotation.y += dt / 1000 * 3;
+        if (u.boing)   { const b = 1 + Math.sin(clock * 9) * 0.08; cos.tailObj.scale.set(b, 2 - b, b); }
+        if (cos.tail?.follower) {
+          const back = cos.tail.hop ? 12 : 16;
+          follower.position.set(
+            fold(bx[j] + dx * back),
+            cos.tail.hop ? Math.abs(Math.sin(clock * 7)) * 4 : 13 + Math.sin(clock * 2.6) * 2.2,
+            fold(bz[j] + dz * back),
+          );
+          follower.rotation.y = yaw + (cos.tail.hop ? 0 : Math.sin(clock * 1.3) * 0.25);
+        }
+        if (cos.tail?.emitter) {
+          tailAnchor.updateMatrixWorld();
+          scratch.set(0, 2.5, 3.5).applyMatrix4(tailAnchor.matrixWorld);
+          for (let k = 0; k < 2; k++) {
+            const i = sdNext; sdNext = (sdNext + 1) % SD;
+            sdPos.set([scratch.x + (Math.random() - 0.5) * 5, scratch.y + (Math.random() - 0.5) * 4, scratch.z + (Math.random() - 0.5) * 5], i * 3);
+            sdLife[i] = 1; sdHue[i] = Math.random();
+          }
+        }
+      }
+      if (stardust.visible) {
+        for (let i = 0; i < SD; i++) {
+          if (sdLife[i] <= 0) { sdCol[i * 3] = sdCol[i * 3 + 1] = sdCol[i * 3 + 2] = 0; continue; }
+          sdLife[i] -= dt / 1000 * 0.9;
+          tmpColor.setHSL(0.12 + sdHue[i] * 0.1, 1, 0.6).multiplyScalar(Math.max(0, sdLife[i]));
+          sdCol[i * 3] = tmpColor.r; sdCol[i * 3 + 1] = tmpColor.g; sdCol[i * 3 + 2] = tmpColor.b;
+        }
+        sdGeo.attributes.position.needsUpdate = true;
+        sdGeo.attributes.color.needsUpdate    = true;
+      }
+      if (cos.fx) {
+        const fx = cos.fx, step = Math.min(dt, 50) / 1000;
+        for (let i = 0; i < fx.n; i++) {
+          const k = i * 3;
+          wxPos[k]     += (wxVel[k] + Math.sin(clock * 1.3 + i) * fx.sway) * step;
+          wxPos[k + 1] += wxVel[k + 1] * step;
+          wxPos[k + 2] += (wxVel[k + 2] + Math.cos(clock * 1.1 + i * 1.7) * fx.sway) * step;
+          if (fx.rise ? wxPos[k + 1] > fx.area : wxPos[k + 1] < 0) wxPos[k + 1] = fx.rise ? 0 : fx.area;
+          if (Math.abs(wxPos[k]) > HALF) wxPos[k] = -Math.sign(wxPos[k]) * HALF;
+          if (Math.abs(wxPos[k + 2]) > HALF) wxPos[k + 2] = -Math.sign(wxPos[k + 2]) * HALF;
+        }
+        wxGeo.attributes.position.needsUpdate = true;
+      }
+
       // Portal glow pulse
       if (portal.visible) portalMat.opacity = 0.55 + 0.25 * Math.sin(now * 0.004);
 
@@ -877,6 +1046,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
           m.dispose();
         }
       });
+      for (const t of sceneRef.current?.texCache.values() ?? []) { t.map?.dispose(); t.glow?.dispose(); }
+      bodyTex.dispose(); headTex.dispose(); dotTex.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
       sceneRef.current = null;
@@ -890,28 +1061,127 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     if (sceneRef.current) sceneRef.current.portal.visible = wrap;
   }, [wrap]);
 
-  // ── Per-level theme ──────────────────────────────────────────────────────────
-  // Runs on mount (after the effect above, which is declared first) and on every
-  // level change. Mutates materials and lights in place; the scene graph itself
-  // is never rebuilt.
+  // ── Per-level theme / board ──────────────────────────────────────────────────
+  // Runs on mount (after the effect above, which is declared first), on every
+  // level change and when the player picks a board. Mutates materials and
+  // lights in place; the scene graph itself is never rebuilt. The 'level'
+  // board is the level theme as is; any other board overrides its look.
+  const boardId = loadout.board;
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
 
     const level     = getLevel(Math.max(levelIndex ?? 0, 0));
     const { theme } = level;
-    s.scene.background.set(theme.bg);
-    s.groundMat.color.set(theme.ground);
-    s.gridMat.color.set(theme.grid);
-    s.ambient.color.set(theme.ambient);
-    s.sun.color.set(theme.sun);
+    const board     = findItem('board', boardId);
+    const custom    = board && board.id !== 'level';
+    s.scene.background.set(custom ? board.bg : theme.bg);
+    let groundMap = null;
+    if (custom) {
+      const key = `ground:${board.id}`;
+      if (!s.texCache.has(key)) {
+        const c = paintGround(board);
+        const map = c ? new THREE.CanvasTexture(c) : null;
+        if (map) map.colorSpace = THREE.SRGBColorSpace;
+        s.texCache.set(key, { map });
+      }
+      groundMap = s.texCache.get(key).map;
+    }
+    if (s.groundMat.map !== groundMap) { s.groundMat.map = groundMap; s.groundMat.needsUpdate = true; }
+    s.groundMat.color.set(groundMap ? 0xffffff : custom ? board.ground : theme.ground);
+    s.gridMat.color.set(custom ? board.grid : theme.grid);
+    s.gridMat.opacity = custom ? board.gridOp : 0.25;
+    s.ambient.color.set(custom ? board.ambient : theme.ambient);
+    s.sun.color.set(custom ? board.sun : theme.sun);
     s.fill.color.set(theme.fill);
     s.mineMat.color.set(theme.food);
-    s.obstacleMat.color.set(theme.obstacle);
+    s.obstacleMat.color.set(custom ? board.obstacle : theme.obstacle);
+    s.obstacleMat.emissive.set(custom && board.obstacleGlow ? board.obstacleGlow : 0x000000);
     s.portalMat.color.set(level.color);
+    s.setWeather(custom && board.fx ? FX[board.fx] : null);
     // Obstacle instances are synced by the rAF loop from the engine's record
     // version — see syncObstacles in the mount effect.
-  }, [levelIndex]);
+  }, [levelIndex, boardId]);
+
+  // ── Skin ─────────────────────────────────────────────────────────────────────
+  const skinId = loadout.skin;
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const skin = findItem('skin', skinId) ?? findItem('skin', 'coral');
+    cosRef.current.skin = skin;
+    const { bodyMat, headMat, eyeMat } = s;
+    if (skin.builtin) {
+      bodyMat.map = s.bodyTex; bodyMat.emissiveMap = null;
+      bodyMat.specular.set(0x808080); bodyMat.shininess = 90;
+      headMat.map = s.headTex; headMat.color.set(0xffffff);
+      headMat.specular.set(0x999999); headMat.shininess = 110;
+    } else {
+      if (!s.texCache.has(skin.id)) {
+        const painted = paintSkin(skin);
+        const tex = (c) => {
+          if (!c) return null;
+          const t = new THREE.CanvasTexture(c);
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+          t.colorSpace = THREE.SRGBColorSpace;
+          // Body UVs advance BAND_PER_UNIT (0.24 per cell); one tile spans `ulen` cells.
+          t.repeat.x = 1 / ((skin.ulen ?? 2) * 0.24);
+          return t;
+        };
+        s.texCache.set(skin.id, { map: tex(painted?.map), glow: tex(painted?.glow) });
+      }
+      const t = s.texCache.get(skin.id);
+      bodyMat.map = t.map; bodyMat.emissiveMap = t.glow;
+      bodyMat.specular.set(skin.head.spec); bodyMat.shininess = Math.min(skin.head.shin, 120);
+      headMat.map = null; headMat.color.set(skin.head.color);
+      headMat.specular.set(skin.head.spec); headMat.shininess = skin.head.shin;
+    }
+    bodyMat.emissive.set(bodyMat.emissiveMap ? 0xffffff : 0x000000);
+    bodyMat.emissiveIntensity = 1;
+    bodyMat.needsUpdate = headMat.needsUpdate = true;
+    eyeMat.color.set(skin.builtin ? 0xf2d21a : skin.eye.color);
+    eyeMat.emissive.set(skin.builtin ? 0x352600 : skin.eye.glow);
+    for (const h of s.heads) h.traverse((o) => { if (o.name === 'socket') o.visible = !!skin.eye?.socket; });
+  }, [skinId]);
+
+  // ── Hat ──────────────────────────────────────────────────────────────────────
+  const hatId = loadout.hat;
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const hat = findItem('hat', hatId);
+    if (!hat || hat.id === 'none') return;
+    const built = hat.build();
+    built.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    // The board head wears the original; wrap-mode head copies share its geometry.
+    const worn = s.hatAnchors.map((a, i) => { const h = i === 0 ? built : built.clone(); a.add(h); return h; });
+    return () => {
+      worn.forEach((h) => h.removeFromParent());
+      built.traverse((o) => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
+    };
+  }, [hatId]);
+
+  // ── Tail decoration ──────────────────────────────────────────────────────────
+  const tailId = loadout.tail;
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const tail = findItem('tail', tailId);
+    if (!tail || tail.id === 'none') return;
+    const built = tail.build();
+    const cos   = cosRef.current;
+    (tail.follower ? s.follower : s.tailAnchor).add(built);
+    s.stardust.visible = !!tail.emitter;
+    cos.tail = tail;
+    cos.tailObj = built;
+    return () => {
+      built.removeFromParent();
+      built.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+      s.stardust.visible = false;
+      cos.tail = null;
+      cos.tailObj = null;
+    };
+  }, [tailId]);
 
   return (
     <canvas

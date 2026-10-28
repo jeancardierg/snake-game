@@ -212,6 +212,86 @@ body {
   outline-offset: 3px;
 }
 
+/* Secondary overlay action (Customize) — outlined so Resume stays the primary. */
+.overlay-btn-ghost {
+  background: transparent;
+  color: #e0e0e0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  margin-top: 0;
+}
+
+/* ── Wardrobe (pause → Customize) ──
+   Fills the board. The top strip stays see-through so the paused snake shows
+   each pick live; the panel below scrolls on its own. */
+.overlay-wardrobe {
+  justify-content: flex-end;
+  background: linear-gradient(to bottom, rgba(10, 10, 15, 0) 0%, rgba(10, 10, 15, 0.35) 28%);
+  backdrop-filter: none;
+  padding: 0;
+}
+.ward {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 58%;
+  min-height: 0;
+  background: rgba(10, 10, 15, 0.94);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0 0 8px 8px;
+}
+.ward-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 0;
+}
+.ward-title { font-size: 15px; font-weight: 900; letter-spacing: 4px; color: #fff; }
+.ward-back {
+  background: none; border: 1px solid rgba(255, 255, 255, 0.25); color: #e0e0e0;
+  border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+}
+.ward-tabs { display: flex; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.ward-tab {
+  flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  padding: 8px 2px; color: #999; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; cursor: pointer;
+}
+.ward-tab[aria-selected="true"] { color: #fff; border-bottom-color: var(--ward-accent, #4ecca3); }
+.ward-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 12px; overscroll-behavior: contain; }
+.ward-group { display: flex; flex-direction: column; gap: 6px; }
+.ward-group-label { font-size: 10px; font-weight: 800; letter-spacing: 2.5px; color: #999; text-transform: uppercase; }
+.ward-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.ward-tile {
+  position: relative; display: flex; flex-direction: column; gap: 4px; padding: 5px; min-width: 0;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid transparent; border-radius: 6px;
+  color: #e0e0e0; text-align: left; cursor: pointer;
+}
+.ward-tile:hover { background: rgba(255, 255, 255, 0.09); }
+.ward-tile[aria-pressed="true"] { border-color: var(--ward-accent, #4ecca3); background: rgba(255, 255, 255, 0.1); }
+.ward-tile:focus-visible, .ward-tab:focus-visible, .ward-back:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.ward-swatch {
+  width: 100%; aspect-ratio: 5 / 3; border-radius: 4px; background-color: rgba(0, 0, 0, 0.3);
+  background-size: cover; background-position: center; position: relative; overflow: hidden;
+}
+.ward-thumb { background-size: contain; background-repeat: no-repeat; }
+.ward-empty { display: grid; place-items: center; color: #777; font-size: 18px; }
+.ward-skin {
+  aspect-ratio: 4 / 1.3; margin-block: 6px; border-radius: 999px; background-size: 60% 100%; background-repeat: repeat-x;
+  box-shadow: inset 0 -4px 6px rgba(0, 0, 0, 0.35), inset 0 3px 5px rgba(255, 255, 255, 0.18);
+}
+.ward-skin i {
+  position: absolute; left: -2px; top: -12%; height: 124%; aspect-ratio: 1.3; border-radius: 50%;
+  box-shadow: inset -3px -4px 6px rgba(0, 0, 0, 0.35);
+}
+.ward-name { font-size: 11px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.ward-chip {
+  align-self: flex-start; font-size: 8px; font-weight: 800; letter-spacing: 1px; padding: 1px 4px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08); color: #999;
+}
+.ward-chip-halloween { color: #ff8a2a; background: rgba(255, 138, 42, 0.12); }
+.ward-chip-easter { color: #ff9cc6; background: rgba(255, 156, 198, 0.12); }
+.ward-foot { display: flex; justify-content: center; padding: 8px 12px 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.ward-foot .overlay-btn { margin-top: 0; padding: 8px 28px; }
+
 /* Level identifier — "LEVEL 07 · EMBERFALL". Color is set inline per level. */
 .overlay-level-id {
   font-size: 15px;

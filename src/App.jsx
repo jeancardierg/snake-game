@@ -11,7 +11,7 @@
  *   <board-slot>   flexible area; the board is the largest square that fits it
  *     <canvas-wrap>
  *       <GameCanvas> the game board
- *       <Overlay>    idle / paused / dead screens (absolute, over the canvas)
+ *       <Overlay>    idle / paused (+ Customize) / dead screens (absolute, over the canvas)
  *   <DPad>         touch devices only
  *   controls-hint  keyboard shortcuts + Pause, Reset, Music and mode buttons
  *
@@ -29,6 +29,7 @@ import { Overlay } from './components/Overlay';
 import { DPad } from './components/DPad';
 import { DIR, SWIPE_THRESHOLD } from './constants';
 import { isMusicEnabled, setMusicEnabled } from './music';
+import { loadLoadout, saveLoadout } from './cosmetics/loadout';
 import './index.css';
 
 export default function App() {
@@ -51,6 +52,16 @@ export default function App() {
     const next = !isMusicEnabled();
     setMusicEnabled(next);
     setMusicOn(next);
+  }, []);
+
+  // ── Cosmetics (pause menu → Customize) ──────────────────────────────────────
+  const [loadout, setLoadout] = useState(loadLoadout);
+  const changeLoadout = useCallback((slot, id) => {
+    setLoadout((prev) => {
+      const next = { ...prev, [slot]: id };
+      saveLoadout(next);
+      return next;
+    });
   }, []);
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
@@ -128,6 +139,7 @@ export default function App() {
             levelIndex={levelIndex}
             stateRef={stateRef}
             wrap={wrap}
+            loadout={loadout}
           />
           <Overlay
             state={state}
@@ -136,6 +148,8 @@ export default function App() {
             banner={banner}
             onReset={reset}
             onPause={pause}
+            loadout={loadout}
+            onLoadout={changeLoadout}
           />
         </div>
       </div>

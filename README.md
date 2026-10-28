@@ -49,6 +49,7 @@ Classic Snake on a 13×13 board with endless procedurally generated levels — e
 | Restart (after death) | `Enter` or `Space` | Play Again button | Play Again button |
 | Mute / Unmute music | — | 🔊 Music button | 🔊 Music button |
 | Walls / Wrap mode (before a run or after game over) | — | 🧱 Walls / 🌀 Wrap button | 🧱 Walls / 🌀 Wrap button |
+| Autopilot on / off (any time; steering takes over) | — | 🤖 Auto button | 🤖 Auto button |
 
 The snake starts moving as soon as you press a direction key, swipe, or tap a D-Pad button.
 
@@ -69,6 +70,7 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 - **Automatic level-up** based on score thresholds derived from a foods-per-level quota
 - **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
 - **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
+- **Autopilot** — the 🤖 Auto button lets the snake steer itself (`src/autopilot.js`): shortest path to the food when it can still reach its own tail afterwards, otherwise it follows its tail to stall safely. Grid-based, so it works in every camera view including Chase cam, and respects walls, wrap and obstacles. Turning it on from the start screen starts the run; steering by hand mid-run takes back control. A run the autopilot steered at any point never sets a best score (the game-over screen says so). Session-only, off on load
 - **Wrap-around mode** — optional: the board edges become portals, so the snake leaves one edge and re-enters from the opposite one instead of dying. Toggled with the 🧱 Walls / 🌀 Wrap button before a run or after game over (locked mid-run), persisted in `localStorage`; the edges glow in the level's accent color and the body renders sliding continuously through the portal. Classic walls are the default
 - **Best score** saved in `localStorage` across sessions, tracked separately for classic and wrap mode and per board size (records from another grid size don't carry over)
 - **Sharp at any size** — the WebGL drawing buffer follows the canvas's real CSS size × `devicePixelRatio` (capped at 2), so the board renders 1:1 instead of being upscaled; it re-sizes on layout changes, rotation, monitor switches and zoom
@@ -153,7 +155,7 @@ App.jsx
 
 Level data is not part of that flow: `getLevel(n)` in `levels.js` is a pure, memoized function, so every component derives speed, theme, identifier and music from `levelIndex` on its own rather than threading a level object through props.
 
-**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, D-Pad buttons) call the action functions exported by the hook: `applyDir`, `pause`, `reset`, `toggleWrap`.
+**Data flow is one-way:** `useSnake` owns all mutable state. Components receive props and render. User actions (keyboard, swipe, D-Pad buttons) call the action functions exported by the hook: `applyDir`, `pause`, `reset`, `toggleWrap`, `toggleAutopilot`.
 
 **Why refs alongside state?**
 The game loop runs inside a `setInterval`. Because closures capture variables at creation time, a plain `useState` value inside the interval would always read its initial value (stale closure). Every piece of game state that the tick function needs to read or write is mirrored in a `useRef` so it's always current. React state is updated in parallel so the UI re-renders.

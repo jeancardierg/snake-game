@@ -157,6 +157,9 @@ body {
   position: relative;
   width: min(100cqw, 100cqh, var(--board-max));
   aspect-ratio: 1;
+  /* Overlay text scales with the board (cqw below), so the start / game over
+     screens fit the ~210px board of a small phone. */
+  container-type: size;
 }
 /* Browsers without size container queries (Safari < 16): previous behaviour. */
 @supports not (container-type: size) {
@@ -176,15 +179,17 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: clamp(6px, 2.5cqw, 12px);
+  padding: 8px;
+  text-align: center;
   border-radius: 8px;
   backdrop-filter: blur(4px);
   animation: overlay-in 0.2s ease;
 }
 .overlay-title {
-  font-size: 42px;
+  font-size: clamp(26px, 10cqw, 42px);
   font-weight: 900;
-  letter-spacing: 6px;
+  letter-spacing: clamp(3px, 1.4cqw, 6px);
   color: #fff;
   animation: title-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -192,9 +197,19 @@ body {
   font-size: 20px;
 }
 .overlay-hint {
-  font-size: 14px;
+  font-size: clamp(11px, 3.4cqw, 14px);
   color: #999; /* was #888 — bumped for contrast */
 }
+.overlay-howto {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(2px, 1.4cqw, 6px);
+  font-size: clamp(12px, 3.6cqw, 15px);
+  color: #ccc;
+}
+.overlay-howto li { display: flex; gap: 8px; align-items: baseline; }
+.overlay-start { font-weight: 700; font-size: clamp(12px, 3.8cqw, 16px); }
 .overlay-hint.small {
   font-size: 12px;
 }
@@ -321,9 +336,9 @@ body {
 
 /* Level identifier — "LEVEL 07 · EMBERFALL". Color is set inline per level. */
 .overlay-level-id {
-  font-size: 15px;
+  font-size: clamp(11px, 3.6cqw, 15px);
   font-weight: 700;
-  letter-spacing: 3px;
+  letter-spacing: clamp(1.5px, 0.7cqw, 3px);
   text-align: center;
   padding: 4px 14px;
   border-radius: 4px;
@@ -394,6 +409,16 @@ body {
   font-size: 12px;
   color: #aaa;
 }
+.home-tip-open {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.home-tip-open u { color: #4ecca3; }
+.home-tip-open:focus-visible { outline: 2px solid #4ecca3; outline-offset: 2px; }
 .home-tip-close {
   background: none;
   border: 0;
@@ -403,6 +428,23 @@ body {
   cursor: pointer;
 }
 .home-tip-close:focus-visible { outline: 2px solid #4ecca3; outline-offset: 2px; }
+
+/* Add to Home Screen instructions (dialog; reuses the .ward-modal backdrop) */
+.home-help {
+  width: min(380px, 100%);
+  padding: 20px;
+  background: #0d0d13;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.home-help-title { font-size: 18px; color: #fff; }
+.home-help-why { font-size: 13px; color: #aaa; line-height: 1.4; }
+.home-help-steps { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.4; }
+.home-help-steps b { color: #fff; }
+.home-help-ok { align-self: center; }
 
 /* ── D-Pad ── */
 .dpad {

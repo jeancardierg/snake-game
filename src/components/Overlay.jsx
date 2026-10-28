@@ -4,7 +4,7 @@
  *
  * Renders a semi-transparent screen with state-specific content:
  *
- *   idle   → Title + level identifier + keyboard/mobile hints
+ *   idle   → Title + level identifier + how to play (goal, danger, how to start)
  *   paused → "PAUSED" title + Resume and Customize buttons
  *   dead   → "GAME OVER" + final score + level reached + Play Again button
  *
@@ -21,8 +21,12 @@
  *   onPause     function  — called when "Resume" is clicked
  *   onCustomize function  — opens the Customize menu (button hidden if absent)
  *   assisted    boolean   — autopilot steered this run (game over notes best wasn't saved)
+ *   touch       boolean   — touch device: hints name swipes / buttons, not keys
+ *   wrap        boolean   — wrap-around mode (edges are safe)
+ *   turn        boolean   — turn steering (Chase cam): left / right only
  */
 import { getLevel } from '../levels';
+import { startHint } from '../hints';
 
 /** Transient "LEVEL 07 · EMBERFALL" announcement, click-through by design. */
 function LevelBanner({ level }) {
@@ -36,7 +40,7 @@ function LevelBanner({ level }) {
   );
 }
 
-export function Overlay({ state, score, levelIndex, banner, onReset, onPause, onCustomize, assisted }) {
+export function Overlay({ state, score, levelIndex, banner, onReset, onPause, onCustomize, assisted, touch = false, wrap = false, turn = false }) {
   // During active play, render nothing but the level-up banner (if any) — the
   // canvas must stay visible and interactive.
   if (state === 'running') {
@@ -50,8 +54,12 @@ export function Overlay({ state, score, levelIndex, banner, onReset, onPause, on
       <div className="overlay">
         <h1 className="overlay-title">SNAKE</h1>
         <p className="overlay-level-id" style={{ color: level.color }}>{level.title}</p>
-        <p className="overlay-hint">Arrow keys / WASD to start</p>
-        <p className="overlay-hint small">P to pause · Touch: swipe or D-Pad</p>
+        <ul className="overlay-howto">
+          <li><span aria-hidden="true">🍎</span> Eat food to grow</li>
+          <li><span aria-hidden="true">💥</span> {wrap ? 'Edges wrap. Don’t hit yourself' : 'Don’t hit walls or yourself'}</li>
+        </ul>
+        <p className="overlay-hint overlay-start" style={{ color: level.color }}>{startHint({ touch, turn })}</p>
+        <p className="overlay-hint small">{touch ? 'Pause anytime with ⏸' : 'P to pause'}</p>
       </div>
     );
   }
@@ -79,7 +87,7 @@ export function Overlay({ state, score, levelIndex, banner, onReset, onPause, on
         <p className="overlay-level-id" style={{ color: level.color }}>{level.title}</p>
         {assisted && <p className="overlay-hint small">🤖 Autopilot run · best score not saved</p>}
         <button className="overlay-btn" onClick={onReset} style={{ background: level.color }}>Play Again</button>
-        <p className="overlay-hint small">or press Enter / Space</p>
+        {!touch && <p className="overlay-hint small">or press Enter / Space</p>}
       </div>
     );
   }

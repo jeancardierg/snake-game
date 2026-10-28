@@ -31,6 +31,7 @@ import { DIR, SWIPE_THRESHOLD } from './constants';
 import { isMusicEnabled, setMusicEnabled } from './music';
 import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
+import { HomeScreenHelp } from './components/HomeScreenHelp';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
 import { isFullscreenSupported, isFullscreen, toggleFullscreen, onFullscreenChange, needsHomeScreenTip, HOME_SCREEN_TIP_KEY } from './fullscreen';
@@ -98,6 +99,14 @@ export default function App() {
     setHomeTip(false);
     try { localStorage.setItem(HOME_SCREEN_TIP_KEY, '1'); } catch { /* storage blocked */ }
   }, []);
+  // Tapping the tip opens step-by-step instructions (pauses a running game).
+  const [homeHelp, setHomeHelp] = useState(false);
+  const openHomeHelp  = useCallback(() => { if (state === 'running') pause(); setHomeHelp(true); }, [state, pause]);
+  const closeHomeHelp = useCallback(() => setHomeHelp(false), []);
+
+  // Touch device: start-screen instructions talk about swipes and the D-pad
+  // instead of keys. Read once; the pointer type doesn't change mid-session.
+  const [touch] = useState(() => Boolean(globalThis.matchMedia?.('(pointer: coarse)').matches));
 
   // ── Cosmetics (Customize menu) ──────────────────────────────────────────────
   // `saved` is what's stored on the device; `draft` is the menu's working copy
@@ -219,6 +228,9 @@ export default function App() {
             onPause={pause}
             onCustomize={openWardrobe}
             assisted={assisted}
+            touch={touch}
+            wrap={wrap}
+            turn={turnSteer}
           />
         </div>
       </div>
@@ -236,6 +248,8 @@ export default function App() {
           onResume={state === 'paused' ? resumeFromWardrobe : null}
         />
       )}
+
+      {homeHelp && <HomeScreenHelp onClose={closeHomeHelp} />}
 
       {/* Mobile D-Pad (hidden on desktop via CSS media query) */}
       <DPad onDir={steer} levelIndex={levelIndex} turn={turnSteer} />
@@ -305,7 +319,7 @@ export default function App() {
         )}
         {homeTip && (
           <p className="home-tip" role="note">
-            📲 Full screen: Share → Add to Home Screen
+            <button className="home-tip-open" onClick={openHomeHelp}>📲 Play full screen: Add to Home Screen · <u>How?</u></button>
             <button className="home-tip-close" onClick={closeHomeTip} aria-label="Hide tip">✕</button>
           </p>
         )}

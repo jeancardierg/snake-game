@@ -449,8 +449,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     bodyGeom.setAttribute('normal',   new THREE.BufferAttribute(tNor, 3));
     bodyGeom.setAttribute('uv',       new THREE.BufferAttribute(tUv, 2));
     bodyGeom.setIndex(new THREE.BufferAttribute(tIdx, 1));
+    // The tube is rebuilt in world space every frame, so its bounding sphere
+    // (computed once) goes stale; culling against it hides the body when a 3D
+    // camera looks away from where it was first built (e.g. at a board edge).
     const bodyMesh = new THREE.Mesh(bodyGeom, bodyMat);
-    bodyMesh.castShadow = true;
+    bodyMesh.castShadow    = true;
+    bodyMesh.frustumCulled = false;
     scene.add(bodyMesh);
 
     // Wrap-mode copies of the body, one per extra tile the path touches; they

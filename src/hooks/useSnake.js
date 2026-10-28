@@ -5,6 +5,11 @@
  * It owns the tick loop, state machine, input queue, and side effects.
  * No component is allowed to mutate game state directly.
  *
+ * Options:
+ *   turnSteering boolean — the camera turns with the snake (Chase cam), so
+ *                          left/right turn the snake relative to its heading
+ *                          and up/down only start the game
+ *
  * Returns:
  *   headIdxRef   React.MutableRefObject<number>  — pool head index (for GameCanvas)
  *   snakeLenRef  React.MutableRefObject<number>  — live segment count (for GameCanvas)
@@ -18,6 +23,8 @@
  *   wrap        boolean   — wrap-around mode: the head leaves one edge and
  *                           re-enters from the opposite one instead of dying
  *   applyDir    function  — queue a new direction ({x,y})
+ *   steer       function  — player input ({x,y} screen direction); with
+ *                           turnSteering, left/right turn relative to the head
  *   pause       function  — toggle pause/resume
  *   reset       function  — restart the game from scratch
  *   toggleWrap  function  — flip wrap mode (no-op unless idle or dead)
@@ -267,7 +274,7 @@ export function spawnExclusions(headIdx, snakeLen, dir, food, wrap = false) {
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
-export function useSnake() {
+export function useSnake({ turnSteering = false } = {}) {
 
   // ── React state (drives non-canvas UI re-renders) ───────────────────────────
   // snake and food are intentionally NOT state — GameCanvas reads refs directly.
@@ -554,6 +561,25 @@ export function useSnake() {
     }
   }, [startLoop]);
 
+  // Steering mode for the current camera, read by steer() at input time.
+  const turnRef = useRef(turnSteering);
+  useLayoutEffect(() => { turnRef.current = turnSteering; }, [turnSteering]);
+
+  /**
+   * Player input. Screen directions go straight to applyDir; with turn
+   * steering, left/right rotate the latest queued heading (grid y points down,
+   * so left of {x,y} is {y,−x}) and up/down only start the game.
+   */
+  const steer = useCallback((dir) => {
+    if (!turnRef.current) { applyDir(dir); return; }
+    const last = dirQueueRef.current.length > 0
+      ? dirQueueRef.current[dirQueueRef.current.length - 1]
+      : dirRef.current;
+    if (dir.x === -1)     applyDir({ x: last.y,  y: -last.x });
+    else if (dir.x === 1) applyDir({ x: -last.y, y: last.x });
+    else                  applyDir(last);   // same heading: ignored, but starts an idle game
+  }, [applyDir]);
+
   const pause = useCallback(() => {
     if (stateRef.current === 'running') {
       stopLoop();
@@ -633,11 +659,11 @@ export function useSnake() {
       const dir = keyMap[e.key];
       if (!dir) return;
       e.preventDefault();
-      applyDir(dir);
+      steer(dir);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [applyDir, pause, reset]);
+  }, [steer, pause, reset]);
 
   useEffect(() => {
     // Track whether the pause was triggered automatically by a tab hide,
@@ -681,6 +707,6 @@ export function useSnake() {
     // React state for non-canvas UI
     score, best, levelIndex, state, banner, wrap,
     // Actions
-    applyDir, pause, reset, toggleWrap,
+    applyDir, steer, pause, reset, toggleWrap,
   };
 }

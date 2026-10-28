@@ -18,6 +18,9 @@
  *     through one edge and out of the opposite one (see "Wrap rendering" below)
  *   - Cosmetics from the pause menu (see cosmetics/): body skin, hat on the
  *     head, tail decoration, food, and a board look that can replace the level theme
+ *   - Camera view from the same menu (see cameraViews.js): Top-down uses the
+ *     exact orthographic camera; the 3D views and the eased switch between
+ *     views use a perspective camera, with a low rim around the board
  *
  * All game state is read from refs every frame (no React reconciliation per tick).
  * The three.js scene is created once on mount and torn down on unmount.
@@ -39,6 +42,7 @@ import { paintSkin } from '../cosmetics/skins';
 import { FX, paintGround } from '../cosmetics/boards';
 import { DEFAULT_LOADOUT, findItem } from '../cosmetics/loadout';
 import { foodMarker } from '../cosmetics/foods';
+import { DEFAULT_VIEW, createCameraRig } from '../cameraViews';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
@@ -326,6 +330,33 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     obstacleMesh.count         = 0;
     obstacleMesh.frustumCulled = false;
     scene.add(obstacleMesh);
+
+    // ── 3D views ──────────────────────────────────────────────────────────────
+    // The orthographic camera above stays the Top-down view. The other views
+    // (and every switch between views) use this perspective camera, placed each
+    // frame by the rig. Its frustum is wider than the board, so in wrap mode
+    // the off-board halves of the snake copies are cut by clip planes at the
+    // board edges instead (see "Wrap rendering").
+    const pcam = new THREE.PerspectiveCamera(30, 1, 1, 1000);
+    const rig  = createCameraRig(HALF);
+    const boardClip = [
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), HALF), new THREE.Plane(new THREE.Vector3(-1, 0, 0), HALF),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), HALF), new THREE.Plane(new THREE.Vector3(0, 0, -1), HALF),
+    ];
+    // Low rim so the board edge reads in 3D (walls mode; wrap mode has the portal glow).
+    const rim = new THREE.Group();
+    {
+      const T = 3, H = 4;
+      for (const [w, d, x, z] of [[SIZE + 2 * T, T, 0, -HALF - T / 2], [SIZE + 2 * T, T, 0, HALF + T / 2],
+                                  [T, SIZE, -HALF - T / 2, 0], [T, SIZE, HALF + T / 2, 0]]) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w, H, d), obstacleMat);
+        b.position.set(x, H / 2 - 0.5, z);
+        b.castShadow = b.receiveShadow = true;
+        rim.add(b);
+      }
+      rim.visible = false;
+      scene.add(rim);
+    }
 
     // ── Portal edges (wrap mode) ──────────────────────────────────────────────
     // One glow strip per edge: the strip is authored for the top (−Z) edge and
@@ -709,7 +740,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       portal, portalMat,
       // cosmetics
       bodyMat, headMat, eyeMat, bodyTex, headTex, heads, hatAnchors,
-      tailAnchor, follower, stardust, setWeather,
+      tailAnchor, follower, stardust, setWeather, rig,
       foodAnchor, marker, burstColor, eatLight,
       texCache: new Map(),   // skin id / 'ground:<board id>' → textures
     };
@@ -1041,7 +1072,15 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       pGeo.setDrawRange(0, pi);
       pMat.opacity = 0.9;
 
-      renderer.render(scene, cam);
+      // ── Camera ─────────────────────────────────────────────────────────────
+      rig.update(dt, { x: hwp.x, z: hwp.z, ang: anim.headAng ?? 0 });
+      const persp = rig.place(pcam, 1, now);
+      if (persp) { pcam.position.x += shakeX; pcam.position.z += shakeZ; }
+      rim.visible = persp && !wrap;
+      const clipping = persp && wrap ? boardClip : [];
+      if (renderer.clippingPlanes !== clipping && (renderer.clippingPlanes.length || clipping.length)) renderer.clippingPlanes = clipping;
+
+      renderer.render(scene, persp ? pcam : cam);
       rafId = requestAnimationFrame(loop);
     };
 
@@ -1079,6 +1118,17 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     wrapRef.current = wrap;
     if (sceneRef.current) sceneRef.current.portal.visible = wrap;
   }, [wrap]);
+
+  // ── Camera view ──────────────────────────────────────────────────────────────
+  // The first run (mount) jumps straight to the saved view; later picks ease over.
+  const viewId = loadout.view ?? DEFAULT_VIEW;
+  const viewShown = useRef(false);
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    s.rig.setView(viewId, performance.now(), viewShown.current);
+    viewShown.current = true;
+  }, [viewId]);
 
   // ── Per-level theme / board ──────────────────────────────────────────────────
   // Runs on mount (after the effect above, which is declared first), on every

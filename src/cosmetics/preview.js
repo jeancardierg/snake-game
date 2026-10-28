@@ -7,7 +7,9 @@
  * being edited, so the menu shows each pick whatever the game state is
  * (idle, paused or game over) and wherever the real snake happens to be.
  *
- * createPreview(canvas) → { setLoadout(loadout, levelTheme), dispose() }
+ * createPreview(canvas) → { setLoadout(loadout, levelTheme), setView(id | null), dispose() }
+ * setView(id) films the board with that camera view (Customize → View);
+ * null returns to the menu's own showcase angle.
  */
 import * as THREE from 'three';
 import { CELL } from '../constants';
@@ -16,6 +18,7 @@ import { SKINS, paintSkin } from './skins';
 import { BOARDS, FX, paintGround } from './boards';
 import { HATS, TAILS } from './accessories';
 import { FOODS, foodMarker } from './foods';
+import { createCameraRig } from '../cameraViews';
 
 const N = 7, HALF = N * CELL / 2;
 const BODY_LEN = CELL * 5.5;
@@ -282,11 +285,19 @@ export function createPreview(canvas) {
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   let sHead = 0, last = performance.now(), clock = 0, raf = 0, stopped = false;
   let w = 0, h = 0;
+  const rig = createCameraRig(HALF);
+  let viewMode = false;
+
+  function setView(id) {
+    if (id) { rig.setView(id, performance.now(), viewMode); viewMode = true; }
+    else if (viewMode) { viewMode = false; w = 0; }   // w = 0 restores the showcase camera next frame
+  }
 
   function frame(now) {
     if (stopped) return;
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
     if (cw && ch && (cw !== w || ch !== h)) {
+      cam.fov = 34; cam.near = 1; cam.far = 2000;
       w = cw; h = ch;
       renderer.setSize(w, h, false);
       cam.aspect = w / h;
@@ -362,6 +373,10 @@ export function createPreview(canvas) {
       wxGeo.attributes.position.needsUpdate = true;
     }
 
+    at(sHead, P);
+    rig.update(dt * 1000, { x: P.x, z: P.z, ang: head.rotation.y });
+    if (viewMode && h) rig.place(cam, w / h, now, true);
+
     renderer.render(scene, cam);
     raf = requestAnimationFrame(frame);
   }
@@ -376,5 +391,5 @@ export function createPreview(canvas) {
     renderer.forceContextLoss();
   }
 
-  return { setLoadout, dispose };
+  return { setLoadout, setView, dispose };
 }

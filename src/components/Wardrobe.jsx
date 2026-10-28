@@ -1,11 +1,11 @@
 /**
- * Wardrobe — the Customize menu: skins, hats, tail decorations, food and boards,
+ * Wardrobe — the Customize menu: skins, hats, tail decorations, food, boards and the camera view,
  * opened from the pause screen or the bottom bar. A full-screen dialog with a
  * live 3D preview on top; picks are a draft until Save writes them to the
  * device (see App), and closing without saving drops them.
  *
  * Props:
- *   loadout     object    — draft { skin, hat, tail, food, board } item ids
+ *   loadout     object    — draft { skin, hat, tail, food, board, view } item ids
  *   levelIndex  number    — current level (accent colour, 'Level Theme' look)
  *   dirty       boolean   — draft differs from the saved loadout
  *   onChange    function  — (slot, id) when a tile is picked
@@ -21,13 +21,15 @@ import { SKINS } from '../cosmetics/skins';
 import { HATS, TAILS } from '../cosmetics/accessories';
 import { BOARDS } from '../cosmetics/boards';
 import { FOODS } from '../cosmetics/foods';
-import { skinSwatch, boardThumb, accessoryThumbs } from '../cosmetics/thumbs';
+import { skinSwatch, boardThumb, accessoryThumbs, viewThumb } from '../cosmetics/thumbs';
+import { VIEWS, findView } from '../cameraViews';
 
 const TABS = [
   { id: 'skin',  label: 'Skins' },
   { id: 'acc',   label: 'Accessories' },
   { id: 'food',  label: 'Food' },
   { id: 'board', label: 'Board' },
+  { id: 'view',  label: 'View' },
 ];
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
@@ -117,7 +119,7 @@ export function Wardrobe({ loadout, levelIndex, dirty, onChange, onShuffle, onSa
         <h2 className="ward-title" id="ward-title">CUSTOMIZE</h2>
         <button type="button" className="ward-back" onClick={onClose}>{dirty ? 'Discard' : 'Close'}</button>
       </div>
-      <WardrobePreview loadout={loadout} levelIndex={levelIndex} />
+      <WardrobePreview loadout={loadout} levelIndex={levelIndex} view={tab === 'view' ? loadout.view : null} />
       <div className="ward-tabs" role="tablist" aria-label="Customize">
         {TABS.map((t) => (
           <button
@@ -175,6 +177,18 @@ export function Wardrobe({ loadout, levelIndex, dirty, onChange, onShuffle, onSa
             ))}
           </Group>
         ))}
+        {tab === 'view' && (
+          <>
+            <Group label="Camera">
+              {VIEWS.map((v) => (
+                <Tile key={v.id} slot="view" item={v} selected={loadout.view === v.id} onChange={onChange}>
+                  <Thumb url={viewThumb(v)} />
+                </Tile>
+              ))}
+            </Group>
+            <p className="ward-hint">{findView(loadout.view).desc}</p>
+          </>
+        )}
       </div>
 
       <div className="ward-foot">

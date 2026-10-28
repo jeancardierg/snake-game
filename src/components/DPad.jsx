@@ -21,8 +21,10 @@ const DIRS = [
  * Props:
  *   onDir       function({x,y})  — called with the chosen direction vector
  *   levelIndex  number           — used to tint the D-Pad accent color per level
+ *   turn        boolean          — turn steering (Chase cam): only ◄ ► are shown,
+ *                                  and they turn the snake left / right
  */
-export function DPad({ onDir, levelIndex }) {
+export function DPad({ onDir, levelIndex, turn = false }) {
   const level = getLevel(Math.max(levelIndex ?? 0, 0));
 
   const handlePointerDown = (dir) => (e) => {
@@ -36,12 +38,12 @@ export function DPad({ onDir, levelIndex }) {
       aria-label="Directional controls"
       style={{ '--dpad-color': level.color }}
     >
-      {DIRS.map(({ label, dir, pos, ariaLabel }) => (
+      {DIRS.filter(({ pos }) => !turn || pos === 'left' || pos === 'right').map(({ label, dir, pos, ariaLabel }) => (
         <button
           key={pos}
           className={`dpad-btn dpad-${pos}`}
           onPointerDown={handlePointerDown(dir)}
-          aria-label={ariaLabel}
+          aria-label={turn ? `Turn ${pos}` : ariaLabel}
           style={{ borderColor: level.color + '55' }}
         >
           {label}

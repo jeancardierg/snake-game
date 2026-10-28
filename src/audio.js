@@ -6,9 +6,41 @@
  *
  * AudioContext is created lazily on first call (browser autoplay
  * policy requires creation during a user gesture).
+ *
+ * The SFX mute preference lives here (localStorage 'snakeSfx'), separate from
+ * the music preference in music.js. Muting only silences the effects below;
+ * getCtx() keeps working so music is unaffected.
  */
 
 let ctx = null;
+
+// ─── Mute preference ──────────────────────────────────────────────────────────
+
+let sfxEnabled = true;
+
+function readSfxEnabled() {
+  try {
+    return localStorage.getItem('snakeSfx') !== 'off';
+  } catch (e) {
+    console.warn('[audio] localStorage unavailable:', e.message);
+    return true;
+  }
+}
+sfxEnabled = readSfxEnabled();
+
+export function isSfxEnabled() {
+  return sfxEnabled;
+}
+
+/** Toggle sound effects. Sounds already playing finish (they last under a second). */
+export function setSfxEnabled(next) {
+  sfxEnabled = !!next;
+  try {
+    localStorage.setItem('snakeSfx', sfxEnabled ? 'on' : 'off');
+  } catch (e) {
+    console.warn('[audio] localStorage write failed:', e.message);
+  }
+}
 
 /**
  * Shared AudioContext accessor.
@@ -29,6 +61,7 @@ export function getCtx() {
 }
 
 function playTone(freq, duration, type = 'square', volume = 0.15, delay = 0) {
+  if (!sfxEnabled) return;
   const ac = getCtx();
   if (!ac) return;
   const t0 = ac.currentTime + delay;
@@ -67,6 +100,7 @@ export function playLevelUp() {
 
 /** Death: descending C5→C3 slide */
 export function playDeath() {
+  if (!sfxEnabled) return;
   const ac = getCtx();
   if (!ac) return;
   const osc = ac.createOscillator();

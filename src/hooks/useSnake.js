@@ -48,6 +48,7 @@ import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 import { playStart, playEat, playLevelUp, playDeath } from '../audio';
 import { startMusic, stopMusic, pauseMusic, resumeMusic } from '../music';
 import { autopilotDir } from '../autopilot';
+import { markInput, markQueued, markDequeued, clearQueued } from '../inputDebug';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
 // Built from the spawn constants in levels.js, which reserve this row and the
@@ -415,12 +416,14 @@ export function useSnake({ turnSteering = false } = {}) {
         body.push({ x: s.x, y: s.y });
       }
       dirQueueRef.current = [];
+      clearQueued();
       dirRef.current = autopilotDir({
         body, dir: dirRef.current, food: foodRef.current,
         obstacles: obstaclesRef.current.set, wrap: wrapRef.current,
       });
     } else if (dirQueueRef.current.length > 0) {
       const next = dirQueueRef.current.shift();
+      markDequeued();
       const cur  = dirRef.current;
       if (!(next.x === -cur.x && next.y === -cur.y)) {
         dirRef.current = next;
@@ -582,6 +585,7 @@ export function useSnake({ turnSteering = false } = {}) {
     // and prevent queue bloat from rapid key-mashing.
     if (dirQueueRef.current.length < DIR_QUEUE_MAX) {
       dirQueueRef.current.push(newDir);
+      markQueued();
     }
   }, [startLoop]);
 
@@ -662,6 +666,7 @@ export function useSnake({ turnSteering = false } = {}) {
     snakeLenRef.current = INIT_SNAKE.length;
     dirRef.current      = { x: 1, y: 0 };
     dirQueueRef.current = [];
+    clearQueued();
     // Fresh board: take the level's layout as generated (it already reserves the
     // spawn row), then place food clear of both the snake and the obstacles.
     obstaclesRef.current = buildObstacles(START_LEVEL);
@@ -702,6 +707,7 @@ export function useSnake({ turnSteering = false } = {}) {
       const dir = keyMap[e.key];
       if (!dir) return;
       e.preventDefault();
+      markInput(e);
       steer(dir);
     };
     window.addEventListener('keydown', onKey);

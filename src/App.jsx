@@ -27,7 +27,10 @@ import { Scoreboard } from './components/Scoreboard';
 import { LevelBar } from './components/LevelBar';
 import { Overlay } from './components/Overlay';
 import { DPad } from './components/DPad';
-import { DIR, SWIPE_THRESHOLD } from './constants';
+import { SWIPE_THRESHOLD } from './constants';
+import { swipeDir } from './swipe';
+import { DEBUG, markInput } from './inputDebug';
+import { DebugHud } from './components/DebugHud';
 import { isMusicEnabled, setMusicEnabled } from './music';
 import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
@@ -143,35 +146,43 @@ export default function App() {
   const dirty = editing && Object.keys(saved).some((k) => saved[k] !== draft[k]);
 
   // ── Swipe gesture detection ─────────────────────────────────────────────────
-  // Track where each touch started. Using a ref so the handlers are stable
-  // references and don't trigger unnecessary re-renders.
-  const swipeStart = useRef(null);
+  // A swipe steers as soon as the finger has travelled SWIPE_THRESHOLD px, not
+  // when it lifts: waiting for touchend added the whole rest of the gesture to
+  // the input delay. After each steer the origin moves to the finger, so one
+  // continuous L-shaped stroke can queue two turns. The same direction is not
+  // re-fired within a gesture (it would be a second turn in Chase cam).
+  // A ref keeps the handlers stable and out of React state.
+  const swipe = useRef(null);   // { x, y, last } for the active touch
 
   const handleSwipeStart = useCallback((e) => {
     if (!e.touches.length) return;  // touchstart always has ≥1 touch, but guard defensively
     // Record only the first touch point (identifier 0 in multi-touch scenarios)
     const t = e.touches[0];
-    swipeStart.current = { x: t.clientX, y: t.clientY };
+    swipe.current = { x: t.clientX, y: t.clientY, last: null };
   }, []);
 
-  const handleSwipeEnd = useCallback((e) => {
-    if (!swipeStart.current || !e.changedTouches.length) return;
-
-    const t = e.changedTouches[0];
-    const dx = t.clientX - swipeStart.current.x;
-    const dy = t.clientY - swipeStart.current.y;
-    swipeStart.current = null;
-
-    // Ignore micro-movements — must travel at least SWIPE_THRESHOLD px
-    if (Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) return;
-
-    // The dominant axis determines direction
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      steer(dx > 0 ? DIR.RIGHT : DIR.LEFT);
-    } else {
-      steer(dy > 0 ? DIR.DOWN : DIR.UP);
-    }
+  const trackSwipe = useCallback((e, t) => {
+    const g = swipe.current;
+    if (!g || !t) return;
+    const dir = swipeDir(t.clientX - g.x, t.clientY - g.y, SWIPE_THRESHOLD);
+    if (!dir) return;
+    g.x = t.clientX;
+    g.y = t.clientY;
+    if (dir === g.last) return;
+    g.last = dir;
+    markInput(e);
+    steer(dir);
   }, [steer]);
+
+  const handleSwipeMove = useCallback((e) => trackSwipe(e, e.touches[0]), [trackSwipe]);
+
+  // A flick can lift before any touchmove crossed the threshold.
+  const handleSwipeEnd = useCallback((e) => {
+    trackSwipe(e, e.changedTouches[0]);
+    swipe.current = null;
+  }, [trackSwipe]);
+
+  const handleSwipeCancel = useCallback(() => { swipe.current = null; }, []);
 
   // ── Board-width publisher ─────────────────────────────────────────────────
   // The board is sized in CSS from its slot (min of width, height and a cap),
@@ -206,7 +217,9 @@ export default function App() {
           ref={boardRef}
           className="canvas-wrap"
           onTouchStart={handleSwipeStart}
+          onTouchMove={handleSwipeMove}
           onTouchEnd={handleSwipeEnd}
+          onTouchCancel={handleSwipeCancel}
           style={{ touchAction: 'none' }}
         >
           <GameCanvas
@@ -250,6 +263,8 @@ export default function App() {
       )}
 
       {homeHelp && <HomeScreenHelp onClose={closeHomeHelp} />}
+
+      {DEBUG && <DebugHud />}
 
       {/* Mobile D-Pad (hidden on desktop via CSS media query) */}
       <DPad onDir={steer} levelIndex={levelIndex} turn={turnSteer} />

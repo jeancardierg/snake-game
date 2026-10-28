@@ -10,6 +10,7 @@
 export const COLS = 13;          // number of columns
 export const ROWS = 13;          // number of rows
 export const CELL = 20;          // world units per cell
+export const OBSTACLE_H = CELL;  // tallest board-themed obstacle (cosmetics/obstacles.js); camera views fit it
 
 // ─── Level curve ──────────────────────────────────────────────────────────────
 // Levels are generated, not enumerated — see levels.js. Progression is endless

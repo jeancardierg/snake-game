@@ -19,6 +19,7 @@ import { BOARDS, FX, paintGround } from './boards';
 import { HATS, TAILS } from './accessories';
 import { FOODS, foodMarker } from './foods';
 import { createCameraRig } from '../cameraViews';
+import { createObstacleLayer } from './obstacles';
 
 const N = 7, HALF = N * CELL / 2;
 const BODY_LEN = CELL * 5.5;
@@ -101,12 +102,16 @@ export function createPreview(canvas) {
   }
   const wallMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2a });
   const wallGeo = new THREE.BoxGeometry(CELL * 0.9, CELL * 0.7, CELL * 0.9);
-  for (const [x, z] of WALLS) {
+  const wallMeshes = WALLS.map(([x, z]) => {
     const w = new THREE.Mesh(wallGeo, wallMat);
     w.position.set(x * CELL, CELL * 0.35, z * CELL);
     w.castShadow = w.receiveShadow = true;
     scene.add(w);
-  }
+    return w;
+  });
+  const themedWalls = createObstacleLayer();
+  themedWalls.setCells(WALLS.map(([x, z]) => ({ x: x * CELL, z: z * CELL, key: (x + 3) * N + (z + 3) })));
+  scene.add(themedWalls.group);
 
   // Body tube (rebuilt in place each frame)
   const trail = buildTrail();
@@ -256,6 +261,8 @@ export function createPreview(canvas) {
       groundMat.needsUpdate = true;
       gridMat.color.set(look.grid); gridMat.opacity = look.gridOp;
       wallMat.color.set(look.obstacle); wallMat.emissive.set(look.obstacleGlow ?? 0x000000);
+      themedWalls.setBoard(custom ? b.id : null);
+      wallMeshes.forEach((m) => { m.visible = !themedWalls.active; });
       ambient.color.set(look.ambient); sun.color.set(look.sun);
       setFx(custom && b.fx ? FX[b.fx] : null);
     }
@@ -327,6 +334,7 @@ export function createPreview(canvas) {
     bodyGeo.attributes.position.needsUpdate = bodyGeo.attributes.normal.needsUpdate = bodyGeo.attributes.uv.needsUpdate = true;
     if (skin?.scroll && bodyMat.map) bodyMat.map.offset.x = (bodyMat.map.offset.x - dt * skin.scroll) % 1;
     bodyMat.emissiveIntensity = skin?.glowPulse ? 0.75 + 0.35 * Math.sin(clock * 3.2) : 1;
+    if (themedWalls.active) themedWalls.update(now, !reduce);
 
     at(sHead, P);
     head.position.set(P.x, HEAD_Y, P.z);

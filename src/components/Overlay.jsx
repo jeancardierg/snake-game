@@ -5,8 +5,7 @@
  * Renders a semi-transparent screen with state-specific content:
  *
  *   idle   → Title + level identifier + keyboard/mobile hints
- *   paused → "PAUSED" title + Resume and Customize buttons; Customize swaps in
- *            the Wardrobe (skins, accessories, board), applied live
+ *   paused → "PAUSED" title + Resume and Customize buttons
  *   dead   → "GAME OVER" + final score + level reached + Play Again button
  *
  * While state === 'running' the component renders nothing, unless `banner` is
@@ -20,12 +19,9 @@
  *   banner      object    — level descriptor to announce, or null
  *   onReset     function  — called when "Play Again" is clicked
  *   onPause     function  — called when "Resume" is clicked
- *   loadout     object    — current cosmetics, see cosmetics/loadout.js
- *   onLoadout   function  — (slot, id) when a cosmetic is picked
+ *   onCustomize function  — opens the Customize menu (button hidden if absent)
  */
-import { useState } from 'react';
 import { getLevel } from '../levels';
-import { Wardrobe } from './Wardrobe';
 
 /** Transient "LEVEL 07 · EMBERFALL" announcement, click-through by design. */
 function LevelBanner({ level }) {
@@ -39,38 +35,7 @@ function LevelBanner({ level }) {
   );
 }
 
-/**
- * Paused screen. Its own component so the Customize view resets every time the
- * game is paused again (the component unmounts on resume).
- */
-function PausedScreen({ level, levelIndex, onPause, loadout, onLoadout }) {
-  const [customizing, setCustomizing] = useState(false);
-  if (customizing && loadout && onLoadout) {
-    return (
-      <div className="overlay overlay-wardrobe">
-        <Wardrobe
-          loadout={loadout}
-          levelIndex={levelIndex}
-          onChange={onLoadout}
-          onDone={() => setCustomizing(false)}
-          onResume={onPause}
-        />
-      </div>
-    );
-  }
-  return (
-    <div className="overlay">
-      <h2 className="overlay-title">PAUSED</h2>
-      <p className="overlay-level-id" style={{ color: level.color }}>{level.title}</p>
-      <button className="overlay-btn" onClick={onPause} style={{ background: level.color }}>Resume</button>
-      {loadout && onLoadout && (
-        <button className="overlay-btn overlay-btn-ghost" onClick={() => setCustomizing(true)}>Customize</button>
-      )}
-    </div>
-  );
-}
-
-export function Overlay({ state, score, levelIndex, banner, onReset, onPause, loadout, onLoadout }) {
+export function Overlay({ state, score, levelIndex, banner, onReset, onPause, onCustomize }) {
   // During active play, render nothing but the level-up banner (if any) — the
   // canvas must stay visible and interactive.
   if (state === 'running') {
@@ -91,7 +56,16 @@ export function Overlay({ state, score, levelIndex, banner, onReset, onPause, lo
   }
 
   if (state === 'paused') {
-    return <PausedScreen level={level} levelIndex={levelIndex} onPause={onPause} loadout={loadout} onLoadout={onLoadout} />;
+    return (
+      <div className="overlay">
+        <h2 className="overlay-title">PAUSED</h2>
+        <p className="overlay-level-id" style={{ color: level.color }}>{level.title}</p>
+        <button className="overlay-btn" onClick={onPause} style={{ background: level.color }}>Resume</button>
+        {onCustomize && (
+          <button className="overlay-btn overlay-btn-ghost" onClick={onCustomize}>Customize</button>
+        )}
+      </div>
+    );
   }
 
   if (state === 'dead') {

@@ -220,25 +220,38 @@ body {
   margin-top: 0;
 }
 
-/* ── Wardrobe (pause → Customize) ──
-   Fills the board. The top strip stays see-through so the paused snake shows
-   each pick live; the panel below scrolls on its own. */
-.overlay-wardrobe {
-  justify-content: flex-end;
-  background: linear-gradient(to bottom, rgba(10, 10, 15, 0) 0%, rgba(10, 10, 15, 0.35) 28%);
-  backdrop-filter: none;
-  padding: 0;
+/* ── Wardrobe (Customize menu) ──
+   Full-screen dialog: live preview on top, tiles scroll below, actions pinned
+   at the bottom. A centred card on wide screens. */
+.ward-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+  background: rgba(5, 5, 8, 0.78);
+  backdrop-filter: blur(4px);
+  animation: overlay-in 0.2s ease;
 }
 .ward {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  height: 58%;
+  width: min(560px, 100%);
+  height: min(100%, 880px);
   min-height: 0;
-  background: rgba(10, 10, 15, 0.94);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0 0 8px 8px;
+  background: #0d0d13;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  overflow: hidden;
 }
+.ward-preview { flex: 0 0 auto; height: clamp(150px, 34vh, 300px); margin: 8px 12px 0; border-radius: 8px; overflow: hidden; background: #0a0a0f; }
+.ward-preview canvas { display: block; width: 100%; height: 100%; }
 .ward-head {
   display: flex;
   align-items: center;
@@ -289,8 +302,17 @@ body {
 }
 .ward-chip-halloween { color: #ff8a2a; background: rgba(255, 138, 42, 0.12); }
 .ward-chip-easter { color: #ff9cc6; background: rgba(255, 156, 198, 0.12); }
-.ward-foot { display: flex; justify-content: center; padding: 8px 12px 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-.ward-foot .overlay-btn { margin-top: 0; padding: 8px 28px; }
+.ward-foot { display: flex; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.ward-btn {
+  flex: 1; padding: 10px 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06); color: #e0e0e0; font-size: 14px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+}
+.ward-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.ward-btn:disabled { opacity: 0.45; cursor: default; }
+.ward-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.ward-save:not(:disabled) { border-color: var(--ward-accent, #4ecca3); color: var(--ward-accent, #4ecca3); }
+.ward-primary { color: #0a0a0f; border-color: transparent; }
+.ward-note { padding: 0 12px 10px; margin-top: -4px; font-size: 11px; color: #999; text-align: center; }
 
 /* Level identifier — "LEVEL 07 · EMBERFALL". Color is set inline per level. */
 .overlay-level-id {
@@ -335,7 +357,9 @@ body {
 .controls-hint {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 10px;
   font-size: 12px;
   color: #777; /* was #444 — bumped for WCAG AA */
 }

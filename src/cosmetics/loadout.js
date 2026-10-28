@@ -32,6 +32,13 @@ export function sanitizeLoadout(raw) {
   return out;
 }
 
+/** A random item for every slot ('none' counts as a choice for hat and tail). */
+export function randomLoadout(rand = Math.random) {
+  const out = {};
+  for (const [slot, items] of Object.entries(SLOTS)) out[slot] = items[Math.floor(rand() * items.length)].id;
+  return out;
+}
+
 /** Stored loadout, or the default. Never throws. */
 export function loadLoadout() {
   try {

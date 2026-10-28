@@ -2,10 +2,11 @@
  * GameCanvas — WebGL renderer using three.js.
  *
  * Draws the snake game board in full 3D with:
- *   - Snake body: one continuous, tapered tube generated each frame from a
- *     Catmull-Rom spline through the interpolated segment centers, with a
- *     subtle lateral "slither" wave (amplitude ramps from 0 at the head so the
- *     head stays grid-accurate) and glossy procedural scale texture
+ *   - Snake body: one continuous, tapered tube that follows a fixed path on
+ *     the ground (the visited cells with rounded corners, see snakePath.js),
+ *     sampled by distance behind a constant-speed head, with a lateral
+ *     "slither" wave pinned to the ground (amplitude ramps from 0 at the head
+ *     so the head stays grid-accurate) and glossy procedural scale texture
  *   - Sleek wedge head oriented along the body, with eyes + a flicking tongue
  *   - Mine food: dark metallic sphere with spike protrusions and blinking
  *     red detonator
@@ -18,8 +19,8 @@
  * All game state is read from refs every frame (no React reconciliation per tick).
  * The three.js scene is created once on mount and torn down on unmount.
  *
- * Rendering-only module: game logic (useSnake.js) is untouched. The slither and
- * smooth tube are a visual layer over the existing grid path — the head always
+ * Rendering-only module: game logic (useSnake.js) is untouched. The path and
+ * slither are a visual layer over the existing grid path — the head always
  * resolves to its exact cell so food/eat alignment is preserved.
  */
 import { useEffect, useRef } from 'react';
@@ -30,6 +31,7 @@ import { segPool, POOL_SIZE } from '../pool';
 import { computeCanvasSize, MAX_PIXEL_RATIO } from '../canvasSize';
 import { shadowHalfExtent } from '../shadowFit';
 import { BODY_R, HEAD_R, HEAD_Y, HEAD_SCALE, NECK_EXIT, neckProfile } from '../snakeProfile';
+import { filletRadii, samplePath, slitherOffset, SLITHER_AMP } from '../snakePath';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
@@ -198,7 +200,9 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     lastTickMs: null, interpDuration: 270,
     prevFood: null, prevState: 'idle',
     particles: [], shake: null,
-    slitherT: 0, lastFrameMs: null,   // slither wave phase (advances only while running)
+    slitherT: 0, lastFrameMs: null,   // tongue-flick clock (advances only while running)
+    steps: 0,                         // grid steps taken; pins the slither wave to the ground
+    visLen: null, headAng: null,      // drawn body length, smoothed head heading
   });
 
   useEffect(() => {
@@ -368,11 +372,12 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     // so the index list for the first (N-1) ring gaps is a contiguous prefix of
     // the full precomputed index list — no per-frame index rebuild, no leaks.
     const RAD       = 10;                       // radial segments per ring
-    // Capacity: 2 rings per possible segment, so a near-full board still bends
-    // smoothly (a fixed 180 fell to ~1 ring/segment at 169 segments).
-    const MAX_RINGS = Math.max(180, POOL_SIZE * 2);
-    const A_MAX     = CELL * 0.15;               // max slither amplitude (grid-accurate)
-    const WAVES     = 1.6;                        // wave count along the body
+    // Rings are spaced RING_STEP apart along the body, so capacity covers a
+    // snake filling the whole board.
+    const RING_STEP = CELL / 5;
+    const MAX_RINGS = POOL_SIZE * 5 + 2;
+    const BAND_PER_UNIT = 0.24 / CELL;          // ~1 coral band cycle per ~4 segments
+    const HEAD_TURN_MS  = 110;                  // head heading smoothing time constant
 
     const tPos = new Float32Array(MAX_RINGS * RAD * 3);
     const tNor = new Float32Array(MAX_RINGS * RAD * 3);
@@ -417,19 +422,18 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     };
     const bodyTiles   = new Set();
     const headTiles   = new Set();
-    const BODY_MARGIN = BODY_R + A_MAX + 2;   // tube radius + slither + spline slack
+    const BODY_MARGIN = BODY_R + SLITHER_AMP + 2;   // tube radius + slither + slack
     const HEAD_MARGIN = CELL;                 // snout + extended tongue
 
-    // Spline through segment centers + reusable scratch buffers (zero per-frame GC)
-    const centerline  = Array.from({ length: POOL_SIZE }, () => new THREE.Vector3());
-    const curvePoints = [];
-    const curve       = new THREE.CatmullRomCurve3([new THREE.Vector3(), new THREE.Vector3()]);
-    curve.curveType   = 'centripetal';
-    const scP         = new THREE.Vector3();
-    const bx          = new Float32Array(MAX_RINGS);   // base sample X (pre-slither)
-    const bz          = new Float32Array(MAX_RINGS);   // base sample Z (pre-slither)
-    const bd          = new Float32Array(MAX_RINGS);   // distance of each sample behind the head
-    const headDir     = { x: 0, z: -1 };                // smoothed travel direction at the head
+    // Path vertices (segment centres, head first, unwrapped in wrap mode, plus
+    // the cell the tail just left) + reusable scratch buffers (zero per-frame GC)
+    const vx = new Float32Array(POOL_SIZE + 1);      // vertex X, world units
+    const vz = new Float32Array(POOL_SIZE + 1);      // vertex Z, world units
+    const vr = new Float32Array(POOL_SIZE + 1);      // fillet radius per vertex
+    const sp = { x: 0, z: 0, tx: 0, tz: 0 };         // samplePath output
+    const bx = new Float32Array(MAX_RINGS);          // ring centre X (with slither)
+    const bz = new Float32Array(MAX_RINGS);          // ring centre Z (with slither)
+    const bd = new Float32Array(MAX_RINGS);          // distance of each ring behind the head
 
     // ── Head mesh (sleek elongated wedge) + eyes + tongue ─────────────────────
     const headGeo = new THREE.SphereGeometry(HEAD_R, 24, 18);
@@ -539,24 +543,23 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     const EXPLODE_C = new THREE.Color(0xff4400);
 
     // ── Tube builder ──────────────────────────────────────────────────────────
-    // Samples the current spline at N rings, applies the slither offset + taper,
-    // and writes positions/normals/uvs in place. `ulen` scales scale-banding
-    // along the body length.
-    const buildTube = (N, slitherT, ulen) => {
-      // Pass 1: base centerline samples (pre-slither) in XZ, plus the distance
-      // of each sample behind the head (drives the neck profile).
+    // Samples the path (vx/vz/vr, nV vertices) at N rings spread over `total`
+    // units behind the head at `hDist`, applies the slither offset + taper,
+    // and writes positions/normals/uvs in place.
+    const buildTube = (N, total, hDist, headAbs, nV) => {
+      // Pass 1: ring centres — the path point at each distance behind the head,
+      // pushed sideways by the ground-pinned slither wave.
       for (let i = 0; i < N; i++) {
-        curve.getPoint(i / (N - 1), scP);
-        bx[i] = scP.x; bz[i] = scP.z;
-        bd[i] = i === 0 ? 0 : bd[i - 1] + Math.hypot(bx[i] - bx[i - 1], bz[i] - bz[i - 1]);
+        const d = (i / (N - 1)) * total;
+        samplePath(vx, vz, vr, nV, hDist + d, sp);
+        const off = slitherOffset(d, total, headAbs);
+        bx[i] = sp.x - sp.tz * off;
+        bz[i] = sp.z + sp.tx * off;
+        bd[i] = d;
       }
-      // Bands are laid out by distance and start where the neck leaves the head,
-      // so the yellow collar sits right behind the head (the part inside the
-      // head wraps to the black band, unseen). Same band density as before.
-      const uPerUnit = ulen / (bd[N - 1] || 1);
-      // Pass 2: tangent → perpendicular → slither offset → ring of RAD verts
+      // Pass 2: tangent → perpendicular → ring of RAD verts
       for (let i = 0; i < N; i++) {
-        const s  = i / (N - 1);
+        const s  = total > 0 ? bd[i] / total : 0;
         const i0 = Math.max(0, i - 1);
         const i1 = Math.min(N - 1, i + 1);
         let tx = bx[i1] - bx[i0];
@@ -564,11 +567,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
         const tl = Math.hypot(tx, tz) || 1;
         tx /= tl; tz /= tl;
         const px = -tz, pz = tx;                       // horizontal perpendicular
-
-        const amp = A_MAX * Math.min(1, s / 0.25);     // 0 at head → full by 25%
-        const off = amp * Math.sin(s * WAVES * Math.PI * 2 - slitherT * 0.006);
-        const cx  = bx[i] + px * off;
-        const cz  = bz[i] + pz * off;
+        const cx = bx[i], cz = bz[i];
 
         // Radius: taper neck→tail, round the very tip to a point; near the head
         // the neck profile narrows and lowers the tube so it starts inside the
@@ -589,15 +588,13 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
           tPos[vi + 1] = cy + ny * R;
           tPos[vi + 2] = cz + nz * R;
           tNor[vi]     = nx; tNor[vi + 1] = ny; tNor[vi + 2] = nz;
+          // Bands are fixed to the skin by distance and start where the neck
+          // leaves the head, so the yellow collar sits right behind the head.
           const ui = (base + j) * 2;
-          tUv[ui]     = (bd[i] - NECK_EXIT) * uPerUnit;
+          tUv[ui]     = (bd[i] - NECK_EXIT) * BAND_PER_UNIT;
           tUv[ui + 1] = j / RAD;
         }
       }
-      // Head heading: from a point ~half a cell down the neck to the head, so
-      // the head turns smoothly with the body instead of snapping 90°.
-      let hi = 1; while (hi < N - 1 && bd[hi] < CELL * 0.5) hi++;
-      headDir.x = bx[0] - bx[hi]; headDir.z = bz[0] - bz[hi];
 
       bodyGeom.attributes.position.needsUpdate = true;
       bodyGeom.attributes.normal.needsUpdate   = true;
@@ -659,22 +656,26 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       const head = segPool[headIdx % POOL_SIZE];
       if (anim.headIdx !== headIdx) {
         const measured = anim.lastTickMs !== null ? now - anim.lastTickMs : anim.interpDuration;
-        anim.interpDuration = Math.min(Math.max(measured * 0.92, 40), 400);
+        // Full tick, not a fraction of it: the head moves at constant speed and
+        // arrives as the next step starts instead of stopping at every cell.
+        anim.interpDuration = Math.min(Math.max(measured, 40), 400);
         const ph = segPool[(anim.headIdx < 0 ? headIdx : anim.headIdx) % POOL_SIZE];
         anim.prevCell   = { x: ph.x, y: ph.y };
         anim.startMs    = now;
         anim.headIdx    = headIdx;
         anim.lastTickMs = now;
+        anim.steps++;
       }
-      const t    = Math.min(1, (now - anim.startMs) / anim.interpDuration);
-      const tE   = t * t * (3 - 2 * t); // smoothstep ease-in/out
+      const t    = Math.min(1, (now - anim.startMs) / anim.interpDuration);  // linear: constant speed
       let dxR    = head.x - anim.prevCell.x;
       let dyR    = head.y - anim.prevCell.y;
       if (wrap) { dxR = wrapDelta(dxR, COLS); dyR = wrapDelta(dyR, ROWS); }
       const skip = Math.abs(dxR) > 1 || Math.abs(dyR) > 1;
       // In wrap mode hxF/hyF may run up to one cell off the board mid-step.
-      const hxF  = skip ? head.x : anim.prevCell.x + dxR * tE;
-      const hyF  = skip ? head.y : anim.prevCell.y + dyR * tE;
+      const hxF  = skip ? head.x : anim.prevCell.x + dxR * t;
+      const hyF  = skip ? head.y : anim.prevCell.y + dyR * t;
+      // Step progress for the path: 1 (head on its cell) when it did not move.
+      const e    = skip || (dxR === 0 && dyR === 0) ? 1 : t;
 
       // ── Death shake ────────────────────────────────────────────────────────
       if (state === 'dead' && anim.prevState !== 'dead') {
@@ -720,41 +721,44 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
         eatLight.intensity = Math.max(0, eatLight.intensity - 0.2);
       }
 
-      // ── Build snake centerline (head → tail), interpolated ──────────────────
-      // In wrap mode the chain is unwrapped: each point is shifted by whole
-      // boards to sit next to its predecessor (ux/uz), so the path stays
-      // continuous across edges.
-      centerline[0].set(worldX(hxF), CENTER_Y, worldZ(hyF));
-      let ux = hxF, uz = hyF;
-      for (let i = 1; i < snakeLen; i++) {
-        const seg = segPool[(headIdx + i) % POOL_SIZE];
-        let sxF = seg.x, szF = seg.y;
-        if (i < snakeLen - 1) {
-          // Ring slot i+1 held this segment's position before the latest tick.
-          const prev = segPool[(headIdx + i + 1) % POOL_SIZE];
-          let sdx    = seg.x - prev.x;
-          let sdz    = seg.y - prev.y;
-          if (wrap) { sdx = wrapDelta(sdx, COLS); sdz = wrapDelta(sdz, ROWS); }
-          if (Math.abs(sdx) <= 1 && Math.abs(sdz) <= 1) {
-            sxF = prev.x + sdx * tE;
-            szF = prev.y + sdz * tE;
-          }
-        }
+      // ── Build the body path (head → tail) ────────────────────────────────
+      // Vertex k is segment k's cell centre; vertex snakeLen is the cell the
+      // tail just left, which the tail is still sliding out of. In wrap mode
+      // the chain is unwrapped: each vertex is shifted by whole boards to sit
+      // next to its predecessor (ux/uz), so the path stays continuous.
+      const nV = Math.min(snakeLen + 1, POOL_SIZE);
+      let ux = head.x, uz = head.y, pux = ux, puz = uz;   // vertex k−1 and k−2, grid units
+      vx[0] = worldX(ux); vz[0] = worldZ(uz);
+      for (let k = 1; k < nV; k++) {
+        const seg = segPool[(headIdx + k) % POOL_SIZE];
+        let sx = seg.x, sz = seg.y;
         if (wrap) {
-          sxF += COLS * Math.round((ux - sxF) / COLS);
-          szF += ROWS * Math.round((uz - szF) / ROWS);
-          ux = sxF; uz = szF;
+          sx += COLS * Math.round((ux - sx) / COLS);
+          sz += ROWS * Math.round((uz - sz) / ROWS);
         }
-        centerline[i].set(worldX(sxF), CENTER_Y, worldZ(szF));
+        if (k === snakeLen && k >= 2 && Math.abs(sx - ux) + Math.abs(sz - uz) !== 1) {
+          // Slot past the tail is stale (fresh game): extend the last leg.
+          sx = 2 * ux - pux;
+          sz = 2 * uz - puz;
+        }
+        pux = ux; puz = uz; ux = sx; uz = sz;
+        vx[k] = worldX(sx); vz[k] = worldZ(sz);
       }
 
-      // Fit spline and rebuild the tube (needs ≥2 points; snake is always ≥3)
-      if (snakeLen >= 2) {
-        curvePoints.length = snakeLen;
-        for (let i = 0; i < snakeLen; i++) curvePoints[i] = centerline[i];
-        curve.points = curvePoints;
-        const N = Math.max(8, Math.min(MAX_RINGS, Math.round(snakeLen * 4)));
-        buildTube(N, anim.slitherT, snakeLen * 0.24);  // ~1 coral band cycle / ~4 segments
+      // Head sits CELL·(1 − e) along the path, between vertex 1 and vertex 0.
+      const hDist   = CELL * (1 - e);
+      const headAbs = (anim.steps - 1 + e) * CELL;
+      filletRadii(vx, vz, vr, nV, hDist);
+
+      // Drawn length eases out by one cell over a step after eating (the tail
+      // waits on its cell) instead of the tail jumping back.
+      const bodyLen = (snakeLen - 1) * CELL;
+      if (anim.visLen === null || skip || anim.visLen > bodyLen) anim.visLen = bodyLen;
+      else if (state === 'running') anim.visLen = Math.min(bodyLen, anim.visLen + CELL * dt / anim.interpDuration);
+
+      if (snakeLen >= 2 && nV >= 2) {
+        const N = Math.max(2, Math.min(MAX_RINGS, Math.ceil(anim.visLen / RING_STEP) + 1));
+        buildTube(N, anim.visLen, hDist, headAbs, nV);
         bodyMesh.visible = true;
       } else {
         bodyMesh.visible = false;
@@ -765,9 +769,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       let ghostsUsed = 0;
       if (wrap && snakeLen >= 2) {
         bodyTiles.clear();
-        for (let i = 0; i < snakeLen; i++) {
-          addTiles(bodyTiles, centerline[i].x, centerline[i].z, BODY_MARGIN);
-        }
+        for (let k = 0; k < nV; k++) addTiles(bodyTiles, vx[k], vz[k], BODY_MARGIN);
         for (const key of bodyTiles) {
           if (key === ORIGIN_TILE) continue;
           const kx = Math.floor(key / 1024) - TILE_BIAS;
@@ -782,11 +784,19 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       // ── Head placement + orientation ────────────────────────────────────────
       const hwp = cellToWorld(hxF, hyF, HEAD_Y);
       headMesh.position.set(hwp.x, hwp.y, hwp.z);
-      if (snakeLen > 1 && (headDir.x !== 0 || headDir.z !== 0)) {
-        // Follow the neck's smoothed direction (set by buildTube) so the head
-        // turns with the body. Head geometry faces −Z (eyes + tongue on the −Z
-        // snout), so the snout points along (dx,dz) at atan2(−dx,−dz).
-        headMesh.rotation.y = Math.atan2(-headDir.x, -headDir.z);
+      if (snakeLen > 1 && nV >= 2) {
+        // Face along the path (forward = −tangent), eased so a 90° turn reads
+        // as a turn of the head rather than a snap. Head geometry faces −Z
+        // (eyes + tongue on the −Z snout), so the snout points along (dx,dz)
+        // at atan2(−dx,−dz).
+        samplePath(vx, vz, vr, nV, hDist, sp);
+        const target = Math.atan2(sp.tx, sp.tz);
+        if (anim.headAng === null || skip) anim.headAng = target;
+        else {
+          const d = Math.atan2(Math.sin(target - anim.headAng), Math.cos(target - anim.headAng));
+          anim.headAng += d * (1 - Math.exp(-dt / HEAD_TURN_MS));
+        }
+        headMesh.rotation.y = anim.headAng;
       }
 
       // Tongue flick: extend for ~180ms roughly every 1.6s while running

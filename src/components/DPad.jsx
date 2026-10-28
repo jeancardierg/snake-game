@@ -8,6 +8,7 @@
  */
 import { DIR } from '../constants';
 import { getLevel } from '../levels';
+import { markInput } from '../inputDebug';
 
 // Direction vectors imported from constants so there is a single source of truth.
 const DIRS = [
@@ -29,6 +30,7 @@ export function DPad({ onDir, levelIndex, turn = false }) {
 
   const handlePointerDown = (dir) => (e) => {
     e.preventDefault();
+    markInput(e);
     onDir(dir);
   };
 

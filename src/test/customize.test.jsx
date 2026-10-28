@@ -8,7 +8,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { LOADOUT_KEY } from '../cosmetics/loadout';
 
 vi.mock('../components/GameCanvas', () => ({
-  GameCanvas: ({ loadout }) => <div data-testid="board">{`${loadout.skin}/${loadout.hat}/${loadout.tail}/${loadout.board}`}</div>,
+  GameCanvas: ({ loadout }) => <div data-testid="board">{`${loadout.skin}/${loadout.hat}/${loadout.tail}/${loadout.food}/${loadout.board}`}</div>,
 }));
 
 const { default: App } = await import('../App');
@@ -19,19 +19,21 @@ describe('Customize from the bottom bar', () => {
 
   it('applies picks live, persists them only on Save', () => {
     render(<App />);
-    expect(screen.getByTestId('board')).toHaveTextContent('coral/none/none/level');
+    expect(screen.getByTestId('board')).toHaveTextContent('coral/none/none/mine/level');
 
     fireEvent.click(screen.getByRole('button', { name: '🎨 Customize' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Bone Rattler/ }));
-    expect(screen.getByTestId('board')).toHaveTextContent('bone/none/none/level');
+    fireEvent.click(screen.getByRole('tab', { name: 'Food' }));
+    fireEvent.click(screen.getByRole('button', { name: /Jack-o'-Lantern/ }));
+    expect(screen.getByTestId('board')).toHaveTextContent('bone/none/none/pumpkin/level');
     expect(stored()).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(stored()).toEqual({ skin: 'bone', hat: 'none', tail: 'none', board: 'level' });
+    expect(stored()).toEqual({ skin: 'bone', hat: 'none', tail: 'none', food: 'pumpkin', board: 'level' });
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByTestId('board')).toHaveTextContent('bone/none/none/level');
+    expect(screen.getByTestId('board')).toHaveTextContent('bone/none/none/pumpkin/level');
   });
 
   it('drops unsaved picks when closed', () => {
@@ -39,7 +41,7 @@ describe('Customize from the bottom bar', () => {
     fireEvent.click(screen.getByRole('button', { name: '🎨 Customize' }));
     fireEvent.click(screen.getByRole('button', { name: /Candy Cane/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    expect(screen.getByTestId('board')).toHaveTextContent('coral/none/none/level');
+    expect(screen.getByTestId('board')).toHaveTextContent('coral/none/none/mine/level');
     expect(stored()).toBeNull();
   });
 });

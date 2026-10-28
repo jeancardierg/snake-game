@@ -15,6 +15,7 @@ import { BODY_R, HEAD_R, HEAD_Y, HEAD_SCALE } from '../snakeProfile';
 import { SKINS, paintSkin } from './skins';
 import { BOARDS, FX, paintGround } from './boards';
 import { HATS, TAILS } from './accessories';
+import { FOODS, foodMarker } from './foods';
 
 const N = 7, HALF = N * CELL / 2;
 const BODY_LEN = CELL * 5.5;
@@ -23,6 +24,7 @@ const NECK_R   = BODY_R * 0.62, NECK_LEN = CELL * 1.1;
 const NR = 110, RAD = 14;                    // rings × radial segments
 const LOOP = [[-2, -2], [2, -2], [2, 0], [0, 0], [0, 2], [-2, 2]];
 const WALLS = [[2, 2], [-3, 0], [3, -3]];
+const FOOD_CELL = [1, 1];                    // inside the loop, beside the snake's path
 
 const smooth = (t) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 const find = (list, id) => list.find((i) => i.id === id);
@@ -176,6 +178,9 @@ export function createPreview(canvas) {
   head.add(hatAnchor);
   const tailAnchor = new THREE.Group(), follower = new THREE.Group();
   scene.add(tailAnchor, follower);
+  const foodAnchor = new THREE.Group(), marker = foodMarker();
+  marker.group.position.set(FOOD_CELL[0] * CELL, 0.7, FOOD_CELL[1] * CELL);
+  scene.add(foodAnchor, marker.group);
 
   // Weather (board fx)
   const WX = 120, wxPos = new Float32Array(WX * 3), wxVel = new Float32Array(WX * 3), wxCol = new Float32Array(WX * 3);
@@ -190,8 +195,8 @@ export function createPreview(canvas) {
   // ── Loadout ────────────────────────────────────────────────────────────────
   const textures = new Map();
   const tex = (key, make) => { if (!textures.has(key)) textures.set(key, make()); return textures.get(key); };
-  const cur = { skin: null, skinItem: null, hat: null, tail: null, board: null, hatObj: null, tailObj: null, tailItem: null, fx: null };
-  const disposeTree = (o) => o.traverse((m) => { m.geometry?.dispose(); m.material?.map?.dispose(); m.material?.dispose(); });
+  const cur = { skin: null, skinItem: null, hat: null, tail: null, board: null, hatObj: null, tailObj: null, tailItem: null, food: null, foodObj: null, foodItem: null, foodPulse: [], fx: null };
+  const disposeTree = (o) => o.traverse((m) => { m.geometry?.dispose(); for (const x of [m.material].flat()) { x?.map?.dispose(); x?.dispose(); } });
 
   function setLoadout(loadout, levelTheme) {
     if (loadout.skin !== cur.skin) {
@@ -216,6 +221,18 @@ export function createPreview(canvas) {
       if (cur.hatObj) { hatAnchor.remove(cur.hatObj); disposeTree(cur.hatObj); cur.hatObj = null; }
       const h = find(HATS, loadout.hat);
       if (h && h.id !== 'none') { cur.hatObj = h.build(); hatAnchor.add(cur.hatObj); }
+    }
+    if (loadout.food !== cur.food) {
+      cur.food = loadout.food;
+      if (cur.foodObj) { foodAnchor.remove(cur.foodObj); disposeTree(cur.foodObj); }
+      const f = find(FOODS, loadout.food) ?? find(FOODS, 'mine');
+      cur.foodItem = f;
+      cur.foodObj = f.build();
+      cur.foodPulse = [];
+      cur.foodObj.traverse((o) => { if (o.name === 'pulse' && o.material) cur.foodPulse.push(o); });
+      foodAnchor.add(cur.foodObj);
+      foodAnchor.position.set(FOOD_CELL[0] * CELL, f.y, FOOD_CELL[1] * CELL);
+      marker.setColor(f.glow);
     }
     if (loadout.tail !== cur.tail) {
       cur.tail = loadout.tail;
@@ -322,6 +339,13 @@ export function createPreview(canvas) {
       at(sHead - BODY_LEN - (t.hop ? 16 : 22), P);
       follower.position.set(P.x, t.hop ? Math.abs(Math.sin(clock * 7)) * 4 : 13 + Math.sin(clock * 2.6) * 2.2, P.z);
       follower.rotation.y = Math.atan2(-P.tx, -P.tz);
+    }
+
+    if (cur.foodItem) {
+      foodAnchor.rotation.y += cur.foodItem.spin ?? 0.012;
+      const blink = (Math.sin(clock * 8) + 1) / 2;
+      for (const m of cur.foodPulse) m.material.emissiveIntensity = 0.5 + blink;
+      marker.update(clock);
     }
 
     const fx = cur.fx;

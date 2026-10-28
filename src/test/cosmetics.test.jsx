@@ -22,7 +22,8 @@ describe('cosmetics catalog', () => {
   });
 
   it('defaults to the original look', () => {
-    expect(DEFAULT_LOADOUT).toEqual({ skin: 'coral', hat: 'none', tail: 'none', board: 'level' });
+    expect(DEFAULT_LOADOUT).toEqual({ skin: 'coral', hat: 'none', tail: 'none', food: 'mine', board: 'level' });
+    expect(findItem('food', 'mine').builtin).toBe(true);
     for (const [slot, id] of Object.entries(DEFAULT_LOADOUT)) expect(findItem(slot, id)).toBeDefined();
     expect(findItem('skin', 'coral').builtin).toBe(true);
   });
@@ -35,9 +36,21 @@ describe('cosmetics catalog', () => {
   });
 
   it('builds every hat and tail decoration as a three.js group', () => {
-    for (const slot of ['hat', 'tail']) {
+    for (const slot of ['hat', 'tail', 'food']) {
       for (const item of SLOTS[slot]) expect(item.build(), `${slot}:${item.id}`).toBeInstanceOf(Group);
     }
+  });
+
+  it('gives every food a height, eat-burst and marker colour', () => {
+    for (const f of SLOTS.food) {
+      expect(f.y, f.id).toBeGreaterThan(0);
+      expect(Number.isInteger(f.burst) && Number.isInteger(f.glow), f.id).toBe(true);
+    }
+  });
+
+  it('keeps saved looks from before food existed, adding the mine', () => {
+    localStorage.setItem(LOADOUT_KEY, JSON.stringify({ skin: 'bone', hat: 'witch', tail: 'ghost', board: 'graveyard' }));
+    expect(loadLoadout()).toEqual({ skin: 'bone', hat: 'witch', tail: 'ghost', food: 'mine', board: 'graveyard' });
   });
 
   it('gives every board weather layer a known effect', () => {
@@ -55,7 +68,7 @@ describe('loadout persistence', () => {
   });
 
   it('round-trips through localStorage', () => {
-    const picked = { skin: 'candy', hat: 'santa', tail: 'bell', board: 'snow' };
+    const picked = { skin: 'candy', hat: 'santa', tail: 'bell', food: 'gift', board: 'snow' };
     saveLoadout(picked);
     expect(loadLoadout()).toEqual(picked);
   });
@@ -104,6 +117,11 @@ describe('Wardrobe', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Accessories' }));
     fireEvent.click(screen.getByRole('button', { name: /Witch Hat/ }));
     expect(onChange).toHaveBeenCalledWith('hat', 'witch');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Food' }));
+    expect(screen.getByRole('button', { name: /Classic Mine/ })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /Easter Egg/ }));
+    expect(onChange).toHaveBeenCalledWith('food', 'egg');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Board' }));
     expect(screen.getByRole('button', { name: /Level Theme/ })).toHaveAttribute('aria-pressed', 'true');

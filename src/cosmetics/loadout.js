@@ -1,5 +1,5 @@
 /**
- * loadout.js — the player's chosen skin / hat / tail / board.
+ * loadout.js — the player's chosen skin / hat / tail / food / board.
  *
  * Persisted in localStorage. Every read goes through sanitizeLoadout, so an
  * unknown id (an item renamed or removed in a later build, or a hand-edited
@@ -8,11 +8,12 @@
 import { SKINS } from './skins';
 import { HATS, TAILS } from './accessories';
 import { BOARDS } from './boards';
+import { FOODS } from './foods';
 
-export const SLOTS = { skin: SKINS, hat: HATS, tail: TAILS, board: BOARDS };
+export const SLOTS = { skin: SKINS, hat: HATS, tail: TAILS, food: FOODS, board: BOARDS };
 
-/** The original look: coral skin, nothing worn, per-level board colours. */
-export const DEFAULT_LOADOUT = Object.freeze({ skin: 'coral', hat: 'none', tail: 'none', board: 'level' });
+/** The original look: coral skin, nothing worn, the mine as food, per-level board colours. */
+export const DEFAULT_LOADOUT = Object.freeze({ skin: 'coral', hat: 'none', tail: 'none', food: 'mine', board: 'level' });
 
 export const LOADOUT_KEY = 'snake-loadout';
 

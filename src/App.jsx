@@ -13,7 +13,7 @@
  *       <GameCanvas> the game board
  *       <Overlay>    idle / paused (+ Customize) / dead screens (absolute, over the canvas)
  *   <DPad>         touch devices only
- *   controls-hint  keyboard shortcuts + Pause, Reset, Music, SFX, Customize, 2D/3D, mode and Autopilot buttons
+ *   controls-hint  keyboard shortcuts + Pause, Reset, Music, SFX, Customize, 2D/3D, mode, Autopilot and Full screen buttons
  *
  * Landscape phones switch to board-left / controls-right (see index.css).
  *
@@ -33,6 +33,7 @@ import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
+import { isFullscreenSupported, isFullscreen, toggleFullscreen, onFullscreenChange, needsHomeScreenTip, HOME_SCREEN_TIP_KEY } from './fullscreen';
 import './index.css';
 
 export default function App() {
@@ -69,6 +70,33 @@ export default function App() {
     const next = !isSfxEnabled();
     setSfxEnabled(next);
     setSfxOn(next);
+  }, []);
+
+  // ── Full screen button (and F key) ──────────────────────────────────────────
+  // Only shown where the browser supports element fullscreen (not iPhone
+  // Safari: there, Add to Home Screen gives full screen via the manifest).
+  // fsOn mirrors the document so Esc / the back gesture update the label.
+  const fsSupported = isFullscreenSupported();
+  const [fsOn, setFsOn] = useState(isFullscreen);
+  useEffect(() => onFullscreenChange(() => setFsOn(isFullscreen())), []);
+  useEffect(() => {
+    if (!fsSupported) return;
+    const onKey = (e) => {
+      if ((e.key === 'f' || e.key === 'F') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) toggleFullscreen();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fsSupported]);
+
+  // iPhone has no fullscreen button, so point at Add to Home Screen instead.
+  // Hidden once closed (remembered on the device) or when already installed.
+  const [homeTip, setHomeTip] = useState(() => {
+    try { if (localStorage.getItem(HOME_SCREEN_TIP_KEY)) return false; } catch { /* storage blocked */ }
+    return needsHomeScreenTip();
+  });
+  const closeHomeTip = useCallback(() => {
+    setHomeTip(false);
+    try { localStorage.setItem(HOME_SCREEN_TIP_KEY, '1'); } catch { /* storage blocked */ }
   }, []);
 
   // ── Cosmetics (Customize menu) ──────────────────────────────────────────────
@@ -264,6 +292,23 @@ export default function App() {
         >
           {autopilot ? '🤖 Auto: on' : '🤖 Auto: off'}
         </button>
+        {fsSupported && (
+          <button
+            className="ctrl-btn"
+            onClick={() => toggleFullscreen()}
+            aria-pressed={fsOn}
+            aria-label={fsOn ? 'Exit full screen' : 'Enter full screen'}
+            title="Full screen (F)"
+          >
+            {fsOn ? '⤡ Exit full' : '⛶ Full screen'}
+          </button>
+        )}
+        {homeTip && (
+          <p className="home-tip" role="note">
+            📲 Full screen: Share → Add to Home Screen
+            <button className="home-tip-close" onClick={closeHomeTip} aria-label="Hide tip">✕</button>
+          </p>
+        )}
       </div>
     </div>
   );

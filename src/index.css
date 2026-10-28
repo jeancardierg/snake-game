@@ -9,6 +9,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* No pull-to-refresh / bounce when a swipe starts just off the board —
+     matters most in full screen and the installed app, where a refresh
+     drops the player out of full screen. */
+  overscroll-behavior: none;
 }
 
 #root {

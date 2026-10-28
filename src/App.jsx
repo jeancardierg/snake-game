@@ -13,7 +13,7 @@
  *       <GameCanvas> the game board
  *       <Overlay>    idle / paused (+ Customize) / dead screens (absolute, over the canvas)
  *   <DPad>         touch devices only
- *   controls-hint  keyboard shortcuts + Pause, Reset, Music, SFX, Customize, 2D/3D, mode and Autopilot buttons
+ *   controls-hint  keyboard shortcuts + Pause, Reset, Music, SFX, Customize, 2D/3D, mode, Autopilot and Full screen buttons
  *
  * Landscape phones switch to board-left / controls-right (see index.css).
  *
@@ -33,6 +33,7 @@ import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
+import { isFullscreenSupported, isFullscreen, toggleFullscreen, onFullscreenChange } from './fullscreen';
 import './index.css';
 
 export default function App() {
@@ -70,6 +71,22 @@ export default function App() {
     setSfxEnabled(next);
     setSfxOn(next);
   }, []);
+
+  // ── Full screen button (and F key) ──────────────────────────────────────────
+  // Only shown where the browser supports element fullscreen (not iPhone
+  // Safari: there, Add to Home Screen gives full screen via the manifest).
+  // fsOn mirrors the document so Esc / the back gesture update the label.
+  const fsSupported = isFullscreenSupported();
+  const [fsOn, setFsOn] = useState(isFullscreen);
+  useEffect(() => onFullscreenChange(() => setFsOn(isFullscreen())), []);
+  useEffect(() => {
+    if (!fsSupported) return;
+    const onKey = (e) => {
+      if ((e.key === 'f' || e.key === 'F') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) toggleFullscreen();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fsSupported]);
 
   // ── Cosmetics (Customize menu) ──────────────────────────────────────────────
   // `saved` is what's stored on the device; `draft` is the menu's working copy
@@ -264,6 +281,17 @@ export default function App() {
         >
           {autopilot ? '🤖 Auto: on' : '🤖 Auto: off'}
         </button>
+        {fsSupported && (
+          <button
+            className="ctrl-btn"
+            onClick={() => toggleFullscreen()}
+            aria-pressed={fsOn}
+            aria-label={fsOn ? 'Exit full screen' : 'Enter full screen'}
+            title="Full screen (F)"
+          >
+            {fsOn ? '⤡ Exit full' : '⛶ Full screen'}
+          </button>
+        )}
       </div>
     </div>
   );

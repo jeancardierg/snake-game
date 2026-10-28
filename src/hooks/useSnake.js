@@ -28,6 +28,11 @@
  *   pause       function  — toggle pause/resume
  *   reset       function  — restart the game from scratch
  *   toggleWrap  function  — flip wrap mode (no-op unless idle or dead)
+ *   autopilot   boolean   — the snake steers itself (see autopilot.js)
+ *   assisted    boolean   — autopilot steered at some point this run, so the
+ *                           run does not count toward best
+ *   toggleAutopilot function — flip autopilot; turning it on from idle starts
+ *                           the run. Player steering mid-run takes back control.
  *
  * Rendering decoupling:
  *   snake and food are no longer returned as React state. Instead, headIdxRef,
@@ -42,6 +47,7 @@ import { getLevel, speedAfterFoods, SPAWN_ROW, SPAWN_HEAD_X, SPAWN_RUNWAY_X } fr
 import { POOL_SIZE, segPool, initPool, poolPrepend, poolGet } from '../pool';
 import { playStart, playEat, playLevelUp, playDeath } from '../audio';
 import { startMusic, stopMusic, pauseMusic, resumeMusic } from '../music';
+import { autopilotDir } from '../autopilot';
 
 // ─── Initial values ───────────────────────────────────────────────────────────
 // Built from the spawn constants in levels.js, which reserve this row and the
@@ -291,6 +297,12 @@ export function useSnake({ turnSteering = false } = {}) {
   // happened — a reset back to the same index must not re-announce it.
   const [banner, setBanner]     = useState(null);
   const bannerTimerRef          = useRef(null);
+  // Autopilot is session-only (never persisted). `assisted` marks a run it
+  // steered, at any point: such a run never writes a best score.
+  const [autopilot, setAutopilot] = useState(false);
+  const [assisted, setAssisted]   = useState(false);
+  const autopilotRef = useRef(false);
+  const assistedRef  = useRef(false);
 
   // ── Refs (readable inside setInterval without stale-closure issues) ──────────
   const dirRef      = useRef(INIT_DIR);
@@ -394,8 +406,20 @@ export function useSnake({ turnSteering = false } = {}) {
    *  7. No setState for snake/food — GameCanvas reads refs directly via rAF.
    */
   const tick = useCallback(() => {
-    // 1. Dequeue next direction
-    if (dirQueueRef.current.length > 0) {
+    // 1. Dequeue next direction — or let the autopilot choose it
+    if (autopilotRef.current) {
+      if (!assistedRef.current) { assistedRef.current = true; setAssisted(true); }
+      const body = [];
+      for (let i = 0; i < snakeLenRef.current; i++) {
+        const s = poolGet(headIdxRef.current, i);
+        body.push({ x: s.x, y: s.y });
+      }
+      dirQueueRef.current = [];
+      dirRef.current = autopilotDir({
+        body, dir: dirRef.current, food: foodRef.current,
+        obstacles: obstaclesRef.current.set, wrap: wrapRef.current,
+      });
+    } else if (dirQueueRef.current.length > 0) {
       const next = dirQueueRef.current.shift();
       const cur  = dirRef.current;
       if (!(next.x === -cur.x && next.y === -cur.y)) {
@@ -454,7 +478,7 @@ export function useSnake({ turnSteering = false } = {}) {
       scoreRef.current = newScore;
       setScore(newScore);
 
-      if (newScore > bestRef.current) {
+      if (!assistedRef.current && newScore > bestRef.current) {
         bestRef.current = newScore;
         setBest(newScore);
         try { localStorage.setItem(bestKey(wrapRef.current), String(newScore)); } catch (e) { console.warn('[useSnake] localStorage write failed:', e.message); }
@@ -571,6 +595,12 @@ export function useSnake({ turnSteering = false } = {}) {
    * so left of {x,y} is {y,−x}) and up/down only start the game.
    */
   const steer = useCallback((dir) => {
+    // Steering mid-run takes the wheel back from the autopilot. From idle the
+    // press only starts the run, and the autopilot keeps driving.
+    if (autopilotRef.current && stateRef.current !== 'idle') {
+      autopilotRef.current = false;
+      setAutopilot(false);
+    }
     if (!turnRef.current) { applyDir(dir); return; }
     const last = dirQueueRef.current.length > 0
       ? dirQueueRef.current[dirQueueRef.current.length - 1]
@@ -613,6 +643,17 @@ export function useSnake({ turnSteering = false } = {}) {
     setBest(nextBest);
   }, []);
 
+  /**
+   * Flip autopilot. Allowed in any state; turning it on from idle starts the
+   * run (this is a user gesture, so music may start here).
+   */
+  const toggleAutopilot = useCallback(() => {
+    const next = !autopilotRef.current;
+    autopilotRef.current = next;
+    setAutopilot(next);
+    if (next && stateRef.current === 'idle') applyDir(dirRef.current);
+  }, [applyDir]);
+
   const reset = useCallback(() => {
     stopLoop();
     stopMusic();
@@ -633,6 +674,8 @@ export function useSnake({ turnSteering = false } = {}) {
     stateRef.current          = 'idle';
     foodsThisLevelRef.current = 0;
     speedRef.current          = getLevel(START_LEVEL).speed;
+    assistedRef.current       = false;
+    setAssisted(false);
     setScore(0);
     setLevel(START_LEVEL);
     setState('idle');
@@ -705,8 +748,8 @@ export function useSnake({ turnSteering = false } = {}) {
     // Refs for GameCanvas (read directly, no React round-trip)
     headIdxRef, snakeLenRef, foodRef, obstaclesRef,
     // React state for non-canvas UI
-    score, best, levelIndex, state, banner, wrap,
+    score, best, levelIndex, state, banner, wrap, autopilot, assisted,
     // Actions
-    applyDir, steer, pause, reset, toggleWrap,
+    applyDir, steer, pause, reset, toggleWrap, toggleAutopilot,
   };
 }

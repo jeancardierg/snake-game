@@ -20,6 +20,7 @@
  *   onReset     function  — called when "Play Again" is clicked
  *   onPause     function  — called when "Resume" is clicked
  *   onCustomize function  — opens the Customize menu (button hidden if absent)
+ *   assisted    boolean   — autopilot steered this run (game over notes best wasn't saved)
  */
 import { getLevel } from '../levels';
 
@@ -35,7 +36,7 @@ function LevelBanner({ level }) {
   );
 }
 
-export function Overlay({ state, score, levelIndex, banner, onReset, onPause, onCustomize }) {
+export function Overlay({ state, score, levelIndex, banner, onReset, onPause, onCustomize, assisted }) {
   // During active play, render nothing but the level-up banner (if any) — the
   // canvas must stay visible and interactive.
   if (state === 'running') {
@@ -76,6 +77,7 @@ export function Overlay({ state, score, levelIndex, banner, onReset, onPause, on
           Score: <span style={{ color: level.color }}>{score}</span>
         </p>
         <p className="overlay-level-id" style={{ color: level.color }}>{level.title}</p>
+        {assisted && <p className="overlay-hint small">🤖 Autopilot run · best score not saved</p>}
         <button className="overlay-btn" onClick={onReset} style={{ background: level.color }}>Play Again</button>
         <p className="overlay-hint small">or press Enter / Space</p>
       </div>

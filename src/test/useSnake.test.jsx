@@ -790,3 +790,57 @@ describe('localStorage resilience', () => {
     expect(() => tick(0)).not.toThrow();
   });
 });
+
+// ─── Autopilot ────────────────────────────────────────────────────────────────
+
+describe('autopilot', () => {
+  it('is off by default and turning it on from idle starts the run', () => {
+    const { result } = renderHook(() => useSnake());
+    expect(result.current.autopilot).toBe(false);
+    act(() => result.current.toggleAutopilot());
+    expect(result.current.autopilot).toBe(true);
+    expect(result.current.state).toBe('running');
+  });
+
+  it('marks the run assisted and never writes a best score', () => {
+    localStorage.setItem(CLASSIC_BEST, '0');
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleAutopilot());
+    // Food straight ahead: the autopilot takes it.
+    act(() => {
+      const h = segPool[result.current.headIdxRef.current % POOL_SIZE];
+      result.current.foodRef.current = { x: h.x + 1, y: h.y };
+    });
+    tick();
+    expect(result.current.score).toBe(10);
+    expect(result.current.assisted).toBe(true);
+    expect(result.current.best).toBe(0);
+    expect(localStorage.getItem(CLASSIC_BEST)).toBe('0');
+  });
+
+  it('player steering mid-run takes back control, but the run stays assisted', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleAutopilot());
+    tick();
+    act(() => result.current.steer(DIR.UP));
+    expect(result.current.autopilot).toBe(false);
+    expect(result.current.assisted).toBe(true);
+  });
+
+  it('reset clears the assisted flag but keeps autopilot on', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleAutopilot());
+    tick();
+    act(() => result.current.reset());
+    expect(result.current.assisted).toBe(false);
+    expect(result.current.autopilot).toBe(true);
+    expect(result.current.state).toBe('idle');
+  });
+
+  it('keeps the snake alive where manual input would crash into the wall', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.toggleAutopilot());
+    for (let i = 0; i < COLS + 2; i++) tick();
+    expect(result.current.state).toBe('running');
+  });
+});

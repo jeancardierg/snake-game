@@ -13,7 +13,7 @@
  *       <GameCanvas> the game board
  *       <Overlay>    idle / paused (+ Customize) / dead screens (absolute, over the canvas)
  *   <DPad>         touch devices only
- *   controls-hint  keyboard shortcuts + Pause, Reset, Music, Customize, 2D/3D and mode buttons
+ *   controls-hint  keyboard shortcuts + Pause, Reset, Music, Customize, 2D/3D, mode and Autopilot buttons
  *
  * Landscape phones switch to board-left / controls-right (see index.css).
  *
@@ -41,7 +41,7 @@ export default function App() {
   const turnSteer = turnSteering(saved.view);
 
   // All game state and actions come from a single hook
-  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, wrap, steer, pause, reset, toggleWrap } = useSnake({ turnSteering: turnSteer });
+  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, wrap, autopilot, assisted, steer, pause, reset, toggleWrap, toggleAutopilot } = useSnake({ turnSteering: turnSteer });
 
   // Mode can only change between runs — useSnake ignores the toggle otherwise.
   const runActive = state === 'running' || state === 'paused';
@@ -180,6 +180,7 @@ export default function App() {
             onReset={reset}
             onPause={pause}
             onCustomize={openWardrobe}
+            assisted={assisted}
           />
         </div>
       </div>
@@ -235,6 +236,15 @@ export default function App() {
           title={runActive ? 'Mode can be changed before a run or after game over' : undefined}
         >
           {wrap ? '🌀 Wrap' : '🧱 Walls'}
+        </button>
+        <button
+          className="ctrl-btn"
+          onClick={toggleAutopilot}
+          aria-pressed={autopilot}
+          aria-label={autopilot ? 'Turn autopilot off' : 'Turn autopilot on'}
+          title="The snake steers itself. Steer to take over. Runs that use autopilot don't set a best score."
+        >
+          {autopilot ? '🤖 Auto: on' : '🤖 Auto: off'}
         </button>
       </div>
     </div>

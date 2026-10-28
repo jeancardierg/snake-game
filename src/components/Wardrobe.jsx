@@ -1,11 +1,11 @@
 /**
- * Wardrobe — the Customize menu: skins, hats, tail decorations and boards,
+ * Wardrobe — the Customize menu: skins, hats, tail decorations, food and boards,
  * opened from the pause screen or the bottom bar. A full-screen dialog with a
  * live 3D preview on top; picks are a draft until Save writes them to the
  * device (see App), and closing without saving drops them.
  *
  * Props:
- *   loadout     object    — draft { skin, hat, tail, board } item ids
+ *   loadout     object    — draft { skin, hat, tail, food, board } item ids
  *   levelIndex  number    — current level (accent colour, 'Level Theme' look)
  *   dirty       boolean   — draft differs from the saved loadout
  *   onChange    function  — (slot, id) when a tile is picked
@@ -20,11 +20,13 @@ import { getLevel } from '../levels';
 import { SKINS } from '../cosmetics/skins';
 import { HATS, TAILS } from '../cosmetics/accessories';
 import { BOARDS } from '../cosmetics/boards';
+import { FOODS } from '../cosmetics/foods';
 import { skinSwatch, boardThumb, accessoryThumbs } from '../cosmetics/thumbs';
 
 const TABS = [
   { id: 'skin',  label: 'Skins' },
   { id: 'acc',   label: 'Accessories' },
+  { id: 'food',  label: 'Food' },
   { id: 'board', label: 'Board' },
 ];
 
@@ -91,7 +93,7 @@ export function Wardrobe({ loadout, levelIndex, dirty, onChange, onShuffle, onSa
   const save = () => { onSave(); setSavedNote(true); };
   const level = getLevel(Math.max(levelIndex ?? 0, 0));
   // Rendered once per page load (cached in thumbs.js); empty under jsdom.
-  const thumbs = useMemo(() => (tab === 'acc' ? accessoryThumbs() : {}), [tab]);
+  const thumbs = useMemo(() => (tab === 'acc' || tab === 'food' ? accessoryThumbs() : {}), [tab]);
 
   const skinTile = (s) => (
     <Tile key={s.id} slot="skin" item={s} selected={loadout.skin === s.id} onChange={onChange}>
@@ -155,6 +157,15 @@ export function Wardrobe({ loadout, levelIndex, dirty, onChange, onShuffle, onSa
             </Group>
           </>
         )}
+        {tab === 'food' && ['Seasonal', 'Signature'].map((g) => (
+          <Group key={g} label={g}>
+            {FOODS.filter((f) => f.group === g).map((f) => (
+              <Tile key={f.id} slot="food" item={f} selected={loadout.food === f.id} onChange={onChange}>
+                <Thumb url={thumbs[`food:${f.id}`]} />
+              </Tile>
+            ))}
+          </Group>
+        ))}
         {tab === 'board' && ['Seasonal', 'Signature'].map((g) => (
           <Group key={g} label={g}>
             {BOARDS.filter((b) => b.group === g).map((b) => (

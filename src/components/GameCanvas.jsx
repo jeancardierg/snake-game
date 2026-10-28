@@ -9,14 +9,15 @@
  *     so the head stays grid-accurate) and glossy procedural scale texture
  *   - Sleek wedge head oriented along the body, with eyes + a flicking tongue
  *   - Mine food: dark metallic sphere with spike protrusions and blinking
- *     red detonator
+ *     red detonator (or the food picked in the Customize menu), on a pulsing
+ *     ground marker so it reads on any board
  *   - Grass-green ground plane + grid lines
  *   - Directional sun + ambient + fill lights, PCF shadow map
  *   - Point-light flash on eat, particle burst, camera shake on death
  *   - Wrap mode: pulsing portal glow on the board edges, and a snake that slides
  *     through one edge and out of the opposite one (see "Wrap rendering" below)
  *   - Cosmetics from the pause menu (see cosmetics/): body skin, hat on the
- *     head, tail decoration, and a board look that can replace the level theme
+ *     head, tail decoration, food, and a board look that can replace the level theme
  *
  * All game state is read from refs every frame (no React reconciliation per tick).
  * The three.js scene is created once on mount and torn down on unmount.
@@ -37,6 +38,7 @@ import { filletRadii, samplePath, slitherOffset, SLITHER_AMP } from '../snakePat
 import { paintSkin } from '../cosmetics/skins';
 import { FX, paintGround } from '../cosmetics/boards';
 import { DEFAULT_LOADOUT, findItem } from '../cosmetics/loadout';
+import { foodMarker } from '../cosmetics/foods';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
 const HALF = SIZE / 2;      // 100
@@ -201,7 +203,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
   const sceneRef = useRef(null);
 
   // Cosmetic state the rAF loop reads (the item objects, not just ids).
-  const cosRef = useRef({ skin: null, tail: null, tailObj: null, fx: null });
+  const cosRef = useRef({ skin: null, tail: null, tailObj: null, food: null, foodObj: null, foodPulse: [], fx: null });
 
   const animRef = useRef({
     prevCell: { x: 0, y: 0 }, startMs: 0, headIdx: -1,
@@ -611,6 +613,15 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     mineGroup.visible = false;
     scene.add(mineGroup);
 
+    // Picked food (anything but the mine) is built into this anchor; the marker
+    // under either keeps the food visible on dark and light boards alike.
+    const foodAnchor = new THREE.Group();
+    foodAnchor.visible = false;
+    scene.add(foodAnchor);
+    const marker = foodMarker();
+    marker.group.visible = false;
+    scene.add(marker.group);
+
     // ── Eat point-light flash ─────────────────────────────────────────────────
     const eatLight = new THREE.PointLight(0xff4400, 0, CELL * 4, 2);
     eatLight.position.y = 20;
@@ -628,7 +639,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     scene.add(new THREE.Points(pGeo, pMat));
 
     const tmpColor  = new THREE.Color();
-    const EXPLODE_C = new THREE.Color(0xff4400);
+    const burstColor = new THREE.Color(0xff4400);   // per food, see the food effect
 
     // ── Tube builder ──────────────────────────────────────────────────────────
     // Samples the path (vx/vz/vr, nV vertices) at N rings spread over `total`
@@ -699,6 +710,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       // cosmetics
       bodyMat, headMat, eyeMat, bodyTex, headTex, heads, hatAnchors,
       tailAnchor, follower, stardust, setWeather,
+      foodAnchor, marker, burstColor, eatLight,
       texCache: new Map(),   // skin id / 'ground:<board id>' → textures
     };
 
@@ -995,20 +1007,27 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       if (portal.visible) portalMat.opacity = 0.55 + 0.25 * Math.sin(now * 0.004);
 
       // ── Mine (food) ────────────────────────────────────────────────────────
-      const mwp = cellToWorld(food.x, food.y, MINE_Y);
-      mineGroup.position.set(mwp.x, mwp.y, mwp.z);
-      mineGroup.rotation.y += 0.012;
-      mineGroup.visible = true;
-      // Blink detonator
+      const picked = cos.foodObj !== null;
+      const foodObj = picked ? foodAnchor : mineGroup;
+      const mwp = cellToWorld(food.x, food.y, picked ? cos.food.y : MINE_Y);
+      foodObj.position.set(mwp.x, mwp.y, mwp.z);
+      foodObj.rotation.y += picked ? (cos.food.spin ?? 0.012) : 0.012;
+      foodObj.visible = true;
+      mineGroup.visible = !picked;
+      marker.group.position.set(mwp.x, 0.7, mwp.z);
+      marker.group.visible = true;
+      marker.update(clock);
+      // Blink detonator (or the picked food's 'pulse' parts)
       const blink = (Math.sin(now * 0.008) + 1) / 2;
       detMat.emissive.setRGB(blink * 0.8, 0, 0);
+      for (const m of cos.foodPulse) m.material.emissiveIntensity = 0.5 + blink;
 
       // ── Particles ─────────────────────────────────────────────────────────
       anim.particles = anim.particles.filter(p => (now - p.startMs) < p.duration);
       let pi = 0;
       for (const p of anim.particles) {
         const pt = (now - p.startMs) / p.duration;
-        tmpColor.copy(EXPLODE_C);
+        tmpColor.copy(burstColor);
         pPos[pi * 3]     = p.ox + p.vx * pt * p.duration * 0.055;
         pPos[pi * 3 + 1] = p.oy + p.vy * pt * 14 - 9.8 * pt * pt * 10;
         pPos[pi * 3 + 2] = p.oz + p.vz * pt * p.duration * 0.055;
@@ -1182,6 +1201,37 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       cos.tailObj = null;
     };
   }, [tailId]);
+
+  // ── Food ─────────────────────────────────────────────────────────────────────
+  const foodId = loadout.food;
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const item = findItem('food', foodId) ?? findItem('food', 'mine');
+    s.marker.setColor(item.glow);
+    s.burstColor.set(item.burst);
+    s.eatLight.color.set(item.burst);
+    if (item.builtin) return;   // the level-tinted mine is drawn by the loop
+    const built = item.build();
+    const cos   = cosRef.current;
+    s.foodAnchor.add(built);
+    const pulse = [];
+    built.traverse((o) => { if (o.name === 'pulse' && o.material) pulse.push(o); });
+    cos.food = item;
+    cos.foodObj = built;
+    cos.foodPulse = pulse;
+    return () => {
+      built.removeFromParent();
+      s.foodAnchor.visible = false;
+      built.traverse((o) => {
+        o.geometry?.dispose();
+        for (const m of [o.material].flat()) { m?.map?.dispose(); m?.dispose(); }
+      });
+      cos.food = null;
+      cos.foodObj = null;
+      cos.foodPulse = [];
+    };
+  }, [foodId]);
 
   return (
     <canvas

@@ -1,7 +1,7 @@
 /**
  * thumbs.js — menu images for the wardrobe, made once and cached.
  *
- * Skin swatches and board thumbnails are 2D canvases. Hat and tail thumbnails
+ * Skin swatches and board thumbnails are 2D canvases. Hat, tail and food thumbnails
  * are rendered with a short-lived offscreen WebGL renderer the first time the
  * menu opens. Every function returns null where the browser (or jsdom) can't
  * draw, and the menu falls back to a plain tile.
@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { paintSkin } from './skins';
 import { HATS, TAILS } from './accessories';
 import { paintBoardThumb } from './boards';
+import { FOODS } from './foods';
 
 const skinUrls = new Map();
 export function skinSwatch(skin) {
@@ -26,7 +27,7 @@ export function boardThumb(board, level) {
 }
 
 let accessoryUrls = null;
-/** { 'hat:witch': dataURL, 'tail:bow': dataURL, … } — empty object if WebGL is unavailable. */
+/** { 'hat:witch': dataURL, 'tail:bow': dataURL, 'food:egg': dataURL, … } — empty object if WebGL is unavailable. */
 export function accessoryThumbs() {
   if (accessoryUrls) return accessoryUrls;
   accessoryUrls = {};
@@ -44,7 +45,7 @@ export function accessoryThumbs() {
   scene.add(key);
   const cam = new THREE.PerspectiveCamera(30, 160 / 110, 0.1, 500);
   const box = new THREE.Box3(), c = new THREE.Vector3(), view = new THREE.Vector3(0.75, 0.55, -1).normalize();
-  for (const [slot, list] of [['hat', HATS], ['tail', TAILS]]) {
+  for (const [slot, list] of [['hat', HATS], ['tail', TAILS], ['food', FOODS]]) {
     for (const item of list) {
       if (item.id === 'none') continue;
       const g = item.build();
@@ -55,7 +56,7 @@ export function accessoryThumbs() {
       r.render(scene, cam);
       accessoryUrls[`${slot}:${item.id}`] = r.domElement.toDataURL();
       scene.remove(g);
-      g.traverse((o) => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
+      g.traverse((o) => { o.geometry?.dispose(); for (const m of [o.material].flat()) { m?.map?.dispose(); m?.dispose(); } });
     }
   }
   r.dispose();

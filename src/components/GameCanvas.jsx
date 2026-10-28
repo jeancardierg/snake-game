@@ -17,7 +17,9 @@
  *   - Wrap mode: pulsing portal glow on the board edges, and a snake that slides
  *     through one edge and out of the opposite one (see "Wrap rendering" below)
  *   - Cosmetics from the pause menu (see cosmetics/): body skin, hat on the
- *     head, tail decoration, food, and a board look that can replace the level theme
+ *     head, tail decoration, food, and a board look that can replace the level
+ *     theme; a themed board also swaps the wall blocks for its own animated
+ *     obstacles (tombstones, snowmen, … — see cosmetics/obstacles.js)
  *   - Camera view from the same menu (see cameraViews.js): Top-down uses the
  *     exact orthographic camera; the 3D views and the eased switch between
  *     views use a perspective camera, with a low rim around the board
@@ -42,6 +44,7 @@ import { paintSkin } from '../cosmetics/skins';
 import { FX, paintGround } from '../cosmetics/boards';
 import { DEFAULT_LOADOUT, findItem } from '../cosmetics/loadout';
 import { foodMarker } from '../cosmetics/foods';
+import { createObstacleLayer } from '../cosmetics/obstacles';
 import { DEFAULT_VIEW, createCameraRig } from '../cameraViews';
 
 const SIZE = COLS * CELL;   // world units (260 on 13×13)
@@ -330,6 +333,10 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     obstacleMesh.count         = 0;
     obstacleMesh.frustumCulled = false;
     scene.add(obstacleMesh);
+    // Themed boards draw their own models on the same cells instead of the blocks.
+    const obstacleLayer = createObstacleLayer();
+    scene.add(obstacleLayer.group);
+    const obstacleMotion = !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
     // ── 3D views ──────────────────────────────────────────────────────────────
     // The orthographic camera above stays the Top-down view. The other views
@@ -736,7 +743,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     // first frame so a level applied on mount (via ?level=N) is never missed.
     sceneRef.current = {
       scene, groundMat, gridMat, ambient, sun, fill,
-      mineMat, obstacleMat,
+      mineMat, obstacleMat, obstacleMesh, obstacleLayer,
       portal, portalMat,
       // cosmetics
       bodyMat, headMat, eyeMat, bodyTex, headTex, heads, hatAnchors,
@@ -762,6 +769,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       }
       obstacleMesh.count = n;
       obstacleMesh.instanceMatrix.needsUpdate = true;
+      obstacleLayer.setCells(cells.slice(0, n).map((c) => ({ x: worldX(c.x), z: worldZ(c.y), key: c.x * ROWS + c.y })));
       drawnObstacleVersion = record?.version ?? -1;
     };
 
@@ -777,6 +785,7 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
       const obstacles = obstaclesRef?.current;
       if (obstacles && obstacles.version !== drawnObstacleVersion) syncObstacles(obstacles);
       const now      = performance.now();
+      if (obstacleLayer.active) obstacleLayer.update(now, obstacleMotion);
       const anim     = animRef.current;
       const food     = foodRef.current;
       const headIdx  = headIdxRef.current;
@@ -1166,6 +1175,8 @@ export function GameCanvas({ headIdxRef, snakeLenRef, foodRef, obstaclesRef, lev
     s.mineMat.color.set(theme.food);
     s.obstacleMat.color.set(custom ? board.obstacle : theme.obstacle);
     s.obstacleMat.emissive.set(custom && board.obstacleGlow ? board.obstacleGlow : 0x000000);
+    s.obstacleLayer.setBoard(custom ? board.id : null);
+    s.obstacleMesh.visible = !s.obstacleLayer.active;
     s.portalMat.color.set(level.color);
     s.setWeather(custom && board.fx ? FX[board.fx] : null);
     // Obstacle instances are synced by the rAF loop from the engine's record

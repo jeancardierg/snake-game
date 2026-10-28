@@ -15,10 +15,11 @@
  * for a board of half-size `half`; GameCanvas and the menu preview share it.
  * Pure apart from the camera it is handed, so it is unit-tested without WebGL.
  */
-import { CELL } from './constants';
+import { CELL, OBSTACLE_H } from './constants';
 
 const D2R = Math.PI / 180;
-const OB_H = CELL * 0.7;               // obstacle height: block tops must stay in frame too
+const OB_H = CELL * 0.7;               // wall block height (menu thumbnails)
+const FIT_H = Math.max(OB_H, OBSTACLE_H); // tallest obstacle: its top must stay in frame too
 
 // pitch: degrees above the ground (90 = straight down). yaw: degrees, 0 looks
 // north (up the screen). fov: vertical field of view in degrees. zoom: 1 fits
@@ -88,10 +89,10 @@ export function project(B, pos, tanH, pt, aspect = 1) {
   return z <= 0.01 ? null : [dot(rel, B.r) / (z * tanH * aspect), dot(rel, B.u) / (z * tanH), z];
 }
 
-/** Ground corners and block-top corners of the board; the circle variant fits any yaw. */
+/** Ground corners and obstacle-top corners of the board; the circle variant fits any yaw. */
 export function boardPoints(half) {
   const square = [], circle = [];
-  for (const y of [0, OB_H]) {
+  for (const y of [0, FIT_H]) {
     for (const [x, z] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) square.push([x * half, y, z * half]);
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;

@@ -4,7 +4,8 @@
  * 'level' keeps the per-level theme from levels.js (the original look). Any
  * other board overrides the theme's backdrop, ground, grid, light tint and
  * obstacle colour, and may add a weather layer (fx). Obstacles keep their
- * gameplay shape; only their colour changes, so the board never hides a wall.
+ * gameplay cells; a board with a set in obstacles.js draws them as its own
+ * themed models on a footprint tile, so the board never hides a wall.
  *
  * Canvas-only (no three.js) so the menu can draw thumbnails without WebGL.
  */

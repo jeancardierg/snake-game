@@ -35,6 +35,7 @@ import { isMusicEnabled, setMusicEnabled } from './music';
 import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
 import { HomeScreenHelp } from './components/HomeScreenHelp';
+import { useWakeLock } from './hooks/useWakeLock';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
 import { isFullscreenSupported, isFullscreen, toggleFullscreen, onFullscreenChange, needsHomeScreenTip, HOME_SCREEN_TIP_KEY } from './fullscreen';
@@ -51,6 +52,9 @@ export default function App() {
 
   // Mode can only change between runs — useSnake ignores the toggle otherwise.
   const runActive = state === 'running' || state === 'paused';
+
+  // Keep the screen awake (no dim / sleep / lock) only while the snake moves.
+  useWakeLock(state === 'running');
 
   // Ref mirror of state so GameCanvas's rAF loop can read it without a React
   // re-render. Updated synchronously after each render via useEffect.

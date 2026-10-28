@@ -13,7 +13,7 @@
  *       <GameCanvas> the game board
  *       <Overlay>    idle / paused (+ Customize) / dead screens (absolute, over the canvas)
  *   <DPad>         touch devices only
- *   controls-hint  keyboard shortcuts + Pause, Reset, Music, Customize, 2D/3D, mode and Autopilot buttons
+ *   controls-hint  keyboard shortcuts + Pause, Reset, Music, SFX, Customize, 2D/3D, mode and Autopilot buttons
  *
  * Landscape phones switch to board-left / controls-right (see index.css).
  *
@@ -29,6 +29,7 @@ import { Overlay } from './components/Overlay';
 import { DPad } from './components/DPad';
 import { DIR, SWIPE_THRESHOLD } from './constants';
 import { isMusicEnabled, setMusicEnabled } from './music';
+import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
@@ -59,6 +60,15 @@ export default function App() {
     const next = !isMusicEnabled();
     setMusicEnabled(next);
     setMusicOn(next);
+  }, []);
+
+  // ── Sound effects toggle ────────────────────────────────────────────────────
+  // Same pattern as music: audio.js owns the preference, this mirrors it.
+  const [sfxOn, setSfxOn] = useState(isSfxEnabled);
+  const toggleSfx = useCallback(() => {
+    const next = !isSfxEnabled();
+    setSfxEnabled(next);
+    setSfxOn(next);
   }, []);
 
   // ── Cosmetics (Customize menu) ──────────────────────────────────────────────
@@ -216,6 +226,14 @@ export default function App() {
           aria-label={musicOn ? 'Mute music' : 'Unmute music'}
         >
           {musicOn ? '🔊 Music' : '🔇 Music'}
+        </button>
+        <button
+          className="ctrl-btn"
+          onClick={toggleSfx}
+          aria-pressed={sfxOn}
+          aria-label={sfxOn ? 'Mute sound effects' : 'Unmute sound effects'}
+        >
+          {sfxOn ? '🔔 SFX' : '🔕 SFX'}
         </button>
         <button className="ctrl-btn" onClick={openWardrobe}>🎨 Customize</button>
         <button

@@ -12,6 +12,9 @@ import {
   buildPattern, startMusic, stopMusic, pauseMusic, resumeMusic,
   isMusicEnabled, setMusicEnabled,
 } from '../music';
+import {
+  isSfxEnabled, setSfxEnabled, playStart, playEat, playLevelUp, playDeath,
+} from '../audio';
 import { getLevel } from '../levels';
 
 const TRACK = getLevel(0).music;
@@ -23,6 +26,7 @@ beforeEach(() => {
 afterEach(() => {
   stopMusic();
   setMusicEnabled(true);
+  setSfxEnabled(true);
   localStorage.clear();
   vi.restoreAllMocks();
 });
@@ -142,5 +146,43 @@ describe('buildPattern', () => {
 
   it('falls back to a known scale when given an unknown one', () => {
     expect(() => buildPattern({ ...TRACK, scale: 'not-a-scale' })).not.toThrow();
+  });
+});
+
+describe('sound effects mute preference', () => {
+  it('defaults to enabled', () => {
+    expect(isSfxEnabled()).toBe(true);
+  });
+
+  it('round-trips through localStorage, independent of music', () => {
+    setSfxEnabled(false);
+    expect(isSfxEnabled()).toBe(false);
+    expect(localStorage.getItem('snakeSfx')).toBe('off');
+    expect(isMusicEnabled()).toBe(true);
+
+    setSfxEnabled(true);
+    expect(isSfxEnabled()).toBe(true);
+    expect(localStorage.getItem('snakeSfx')).toBe('on');
+  });
+
+  it('survives a throwing localStorage', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota exceeded');
+    });
+    expect(() => setSfxEnabled(false)).not.toThrow();
+    expect(isSfxEnabled()).toBe(false);
+  });
+
+  it('effects never touch Web Audio while muted', () => {
+    // A stub constructor would be called on the first unmuted effect.
+    const Ctor = vi.fn();
+    window.AudioContext = Ctor;
+    try {
+      setSfxEnabled(false);
+      playStart(); playEat(); playLevelUp(); playDeath();
+      expect(Ctor).not.toHaveBeenCalled();
+    } finally {
+      delete window.AudioContext;
+    }
   });
 });

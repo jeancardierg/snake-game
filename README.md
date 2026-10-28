@@ -48,6 +48,7 @@ Classic Snake on a 13×13 board with endless procedurally generated levels — e
 | Pause / Resume | `P` | Pause button | Pause button |
 | Restart (after death) | `Enter` or `Space` | Play Again button | Play Again button |
 | Mute / Unmute music | — | 🔊 Music button | 🔊 Music button |
+| Mute / Unmute sound effects | — | 🔔 SFX button | 🔔 SFX button |
 | Walls / Wrap mode (before a run or after game over) | — | 🧱 Walls / 🌀 Wrap button | 🧱 Walls / 🌀 Wrap button |
 | Autopilot on / off (any time; steering takes over) | — | 🤖 Auto button | 🤖 Auto button |
 
@@ -69,7 +70,7 @@ The snake starts moving as soon as you press a direction key, swipe, or tap a D-
 - **Human-paced speed curve** — levels speed up toward a 100 ms floor (10 moves/s) instead of 40 ms; each food speeds the current level up by 1.5% (at most 15%) and the ramp resets on level-up. Tuned against human reaction time and input latency — see [Speed and human limits](#speed-and-human-limits)
 - **Automatic level-up** based on score thresholds derived from a foods-per-level quota
 - **Mine food** — a dark metallic sphere with spike protrusions and a blinking red detonator; eating it fires a point-light flash and an orange particle burst
-- **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death)
+- **8-bit sound effects** — synthesized on the fly with the Web Audio API (game start, eat, level-up, death); can be muted separately from the music with the 🔔 SFX button, persisted in `localStorage`
 - **Autopilot** — the 🤖 Auto button lets the snake steer itself (`src/autopilot.js`): shortest path to the food when it can still reach its own tail afterwards, otherwise it follows its tail to stall safely. Grid-based, so it works in every camera view including Chase cam, and respects walls, wrap and obstacles. Turning it on from the start screen starts the run; steering by hand mid-run takes back control. A run the autopilot steered at any point never sets a best score (the game-over screen says so). Session-only, off on load
 - **Wrap-around mode** — optional: the board edges become portals, so the snake leaves one edge and re-enters from the opposite one instead of dying. Toggled with the 🧱 Walls / 🌀 Wrap button before a run or after game over (locked mid-run), persisted in `localStorage`; the edges glow in the level's accent color and the body renders sliding continuously through the portal. Classic walls are the default
 - **Best score** saved in `localStorage` across sessions, tracked separately for classic and wrap mode and per board size (records from another grid size don't carry over)
@@ -283,6 +284,7 @@ suspended.
 | `playLevelUp()` | 4-note ascending fanfare (sawtooth) |
 | `playDeath()`   | Descending C5→C3 slide |
 | `getCtx()`      | The shared `AudioContext`, or `null` when Web Audio is unavailable |
+| `setSfxEnabled(bool)` / `isSfxEnabled()` | SFX mute toggle, persisted in `localStorage` under `snakeSfx`; music is unaffected |
 
 `useSnake` calls these from the tick loop and state transitions; if the Web Audio
 API is unavailable the calls are silent no-ops.

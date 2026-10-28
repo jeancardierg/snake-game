@@ -8,7 +8,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { LOADOUT_KEY } from '../cosmetics/loadout';
 
 vi.mock('../components/GameCanvas', () => ({
-  GameCanvas: ({ loadout }) => <div data-testid="board">{`${loadout.skin}/${loadout.hat}/${loadout.tail}/${loadout.food}/${loadout.board}`}</div>,
+  GameCanvas: ({ loadout }) => <div data-testid="board">{`${loadout.skin}/${loadout.hat}/${loadout.tail}/${loadout.food}/${loadout.board} view:${loadout.view}`}</div>,
 }));
 
 const { default: App } = await import('../App');
@@ -30,7 +30,7 @@ describe('Customize from the bottom bar', () => {
     expect(stored()).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(stored()).toEqual({ skin: 'bone', hat: 'none', tail: 'none', food: 'pumpkin', board: 'level' });
+    expect(stored()).toEqual({ skin: 'bone', hat: 'none', tail: 'none', food: 'pumpkin', board: 'level', view: 'top' });
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByTestId('board')).toHaveTextContent('bone/none/none/pumpkin/level');
@@ -43,5 +43,28 @@ describe('Customize from the bottom bar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     expect(screen.getByTestId('board')).toHaveTextContent('coral/none/none/mine/level');
     expect(stored()).toBeNull();
+  });
+
+  it('picks a camera on the View tab and the 2D / 3D button flips back and forth', () => {
+    render(<App />);
+    expect(screen.getByRole('button', { name: 'Switch to 3D view' })).toHaveTextContent('▦ 2D');
+    fireEvent.click(screen.getByRole('button', { name: '🎨 Customize' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'View' }));
+    fireEvent.click(screen.getByRole('button', { name: /Chase cam/ }));
+    expect(screen.getByTestId('board')).toHaveTextContent('view:chase');
+    expect(screen.getByText(/turn the snake left or right/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(stored().view).toBe('chase');
+    // Chase cam steers with turns: the D-pad shows only turn buttons.
+    expect(screen.getByRole('button', { name: 'Turn left' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Move up' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to 2D view' }));
+    expect(screen.getByTestId('board')).toHaveTextContent('view:top');
+    expect(stored().view).toBe('top');
+    expect(screen.getByRole('button', { name: 'Move up' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to 3D view' }));
+    expect(screen.getByTestId('board')).toHaveTextContent('view:chase');   // back to the last 3D pick
   });
 });

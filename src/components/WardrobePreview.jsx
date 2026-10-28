@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { getLevel } from '../levels';
 import { createPreview } from '../cosmetics/preview';
 
-export function WardrobePreview({ loadout, levelIndex }) {
+export function WardrobePreview({ loadout, levelIndex, view = null }) {
   const canvasRef  = useRef(null);
   const previewRef = useRef(null);
 
@@ -23,6 +23,11 @@ export function WardrobePreview({ loadout, levelIndex }) {
   useEffect(() => {
     previewRef.current?.setLoadout(loadout, getLevel(Math.max(levelIndex ?? 0, 0)).theme);
   }, [loadout, levelIndex]);
+
+  // On the View tab the preview films the board with the picked camera.
+  useEffect(() => {
+    previewRef.current?.setView(view);
+  }, [view]);
 
   return (
     <div className="ward-preview">

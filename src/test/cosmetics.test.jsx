@@ -22,7 +22,7 @@ describe('cosmetics catalog', () => {
   });
 
   it('defaults to the original look', () => {
-    expect(DEFAULT_LOADOUT).toEqual({ skin: 'coral', hat: 'none', tail: 'none', food: 'mine', board: 'level' });
+    expect(DEFAULT_LOADOUT).toEqual({ skin: 'coral', hat: 'none', tail: 'none', food: 'mine', board: 'level', view: 'top' });
     expect(findItem('food', 'mine').builtin).toBe(true);
     for (const [slot, id] of Object.entries(DEFAULT_LOADOUT)) expect(findItem(slot, id)).toBeDefined();
     expect(findItem('skin', 'coral').builtin).toBe(true);
@@ -50,7 +50,7 @@ describe('cosmetics catalog', () => {
 
   it('keeps saved looks from before food existed, adding the mine', () => {
     localStorage.setItem(LOADOUT_KEY, JSON.stringify({ skin: 'bone', hat: 'witch', tail: 'ghost', board: 'graveyard' }));
-    expect(loadLoadout()).toEqual({ skin: 'bone', hat: 'witch', tail: 'ghost', food: 'mine', board: 'graveyard' });
+    expect(loadLoadout()).toEqual({ skin: 'bone', hat: 'witch', tail: 'ghost', food: 'mine', board: 'graveyard', view: 'top' });
   });
 
   it('gives every board weather layer a known effect', () => {
@@ -68,9 +68,14 @@ describe('loadout persistence', () => {
   });
 
   it('round-trips through localStorage', () => {
-    const picked = { skin: 'candy', hat: 'santa', tail: 'bell', food: 'gift', board: 'snow' };
+    const picked = { skin: 'candy', hat: 'santa', tail: 'bell', food: 'gift', board: 'snow', view: 'chase' };
     saveLoadout(picked);
     expect(loadLoadout()).toEqual(picked);
+  });
+
+  it('keeps the camera view through Shuffle and rejects unknown views', () => {
+    expect(randomLoadout(Math.random, 'chase').view).toBe('chase');
+    expect(sanitizeLoadout({ view: 'fisheye' }).view).toBe('top');
   });
 
   it('shuffles to valid ids in every slot', () => {

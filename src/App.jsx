@@ -13,7 +13,7 @@
  *       <GameCanvas> the game board
  *       <Overlay>    idle / paused (+ Customize) / dead screens (absolute, over the canvas)
  *   <DPad>         touch devices only
- *   controls-hint  keyboard shortcuts + Pause, Reset, Music and mode buttons
+ *   controls-hint  keyboard shortcuts + Pause, Reset, Music, Customize, 2D/3D and mode buttons
  *
  * Landscape phones switch to board-left / controls-right (see index.css).
  *
@@ -31,11 +31,17 @@ import { DIR, SWIPE_THRESHOLD } from './constants';
 import { isMusicEnabled, setMusicEnabled } from './music';
 import { Wardrobe } from './components/Wardrobe';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
+import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
 import './index.css';
 
 export default function App() {
+  // Saved look + camera view (see "Cosmetics" below). Read before useSnake:
+  // the Chase cam view turns steering into turn left / turn right.
+  const [saved, setSaved] = useState(loadLoadout);
+  const turnSteer = turnSteering(saved.view);
+
   // All game state and actions come from a single hook
-  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, wrap, applyDir, pause, reset, toggleWrap } = useSnake();
+  const { headIdxRef, snakeLenRef, foodRef, obstaclesRef, score, best, levelIndex, state, banner, wrap, steer, pause, reset, toggleWrap } = useSnake({ turnSteering: turnSteer });
 
   // Mode can only change between runs — useSnake ignores the toggle otherwise.
   const runActive = state === 'running' || state === 'paused';
@@ -59,7 +65,6 @@ export default function App() {
   // `saved` is what's stored on the device; `draft` is the menu's working copy
   // (null when the menu is closed). The board shows the draft while the menu is
   // open; only Save makes it stick.
-  const [saved, setSaved] = useState(loadLoadout);
   const [draft, setDraft] = useState(null);
   const editing = draft !== null && state !== 'running';
   const loadout = editing ? draft : saved;
@@ -69,8 +74,24 @@ export default function App() {
   }, [state, pause, saved]);
   const closeWardrobe = useCallback(() => setDraft(null), []);
   const changeDraft   = useCallback((slot, id) => setDraft((d) => ({ ...d, [slot]: id })), []);
-  const shuffleDraft  = useCallback(() => setDraft(randomLoadout()), []);
-  const saveDraft     = useCallback(() => { saveLoadout(draft); setSaved(draft); }, [draft]);
+  const shuffleDraft  = useCallback(() => setDraft((d) => randomLoadout(Math.random, d.view)), []);
+  const saveDraft     = useCallback(() => { saveLoadout(draft); saveLast3dView(draft.view); setSaved(draft); }, [draft]);
+
+  // ── 2D / 3D button (and V key) ──────────────────────────────────────────────
+  // Flips between Top-down and the last 3D view picked in Customize, and saves
+  // right away like the Music and Walls/Wrap buttons.
+  const toggleView = useCallback(() => {
+    const next = { ...saved, view: saved.view === DEFAULT_VIEW ? loadLast3dView() : DEFAULT_VIEW };
+    saveLoadout(next);
+    setSaved(next);
+  }, [saved]);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.key === 'v' || e.key === 'V') && draft === null && !e.repeat) toggleView();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleView, draft]);
   const resumeFromWardrobe = useCallback(() => { setDraft(null); pause(); }, [pause]);
   const dirty = editing && Object.keys(saved).some((k) => saved[k] !== draft[k]);
 
@@ -99,11 +120,11 @@ export default function App() {
 
     // The dominant axis determines direction
     if (Math.abs(dx) >= Math.abs(dy)) {
-      applyDir(dx > 0 ? DIR.RIGHT : DIR.LEFT);
+      steer(dx > 0 ? DIR.RIGHT : DIR.LEFT);
     } else {
-      applyDir(dy > 0 ? DIR.DOWN : DIR.UP);
+      steer(dy > 0 ? DIR.DOWN : DIR.UP);
     }
-  }, [applyDir]);
+  }, [steer]);
 
   // ── Board-width publisher ─────────────────────────────────────────────────
   // The board is sized in CSS from its slot (min of width, height and a cap),
@@ -178,11 +199,11 @@ export default function App() {
       )}
 
       {/* Mobile D-Pad (hidden on desktop via CSS media query) */}
-      <DPad onDir={applyDir} levelIndex={levelIndex} />
+      <DPad onDir={steer} levelIndex={levelIndex} turn={turnSteer} />
 
       {/* Keyboard hint + quick-action buttons */}
       <div className="controls-hint">
-        <span>WASD / Arrows / Swipe</span>
+        <span>{turnSteer ? 'A / D / ◀ ▶ turn · Swipe' : 'WASD / Arrows / Swipe'}</span>
         <button className="ctrl-btn" onClick={pause}>
           {state === 'paused' ? '▶ Resume' : '⏸ Pause'}
         </button>
@@ -196,6 +217,15 @@ export default function App() {
           {musicOn ? '🔊 Music' : '🔇 Music'}
         </button>
         <button className="ctrl-btn" onClick={openWardrobe}>🎨 Customize</button>
+        <button
+          className="ctrl-btn"
+          onClick={toggleView}
+          aria-pressed={saved.view !== DEFAULT_VIEW}
+          aria-label={saved.view === DEFAULT_VIEW ? 'Switch to 3D view' : 'Switch to 2D view'}
+          title="Pick the 3D view in Customize → View (V)"
+        >
+          {saved.view === DEFAULT_VIEW ? '▦ 2D' : '🧊 3D'}
+        </button>
         <button
           className="ctrl-btn"
           onClick={toggleWrap}

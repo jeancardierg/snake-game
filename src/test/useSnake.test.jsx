@@ -192,6 +192,49 @@ describe('direction queue', () => {
   });
 });
 
+// ─── Turn steering (Chase cam) ────────────────────────────────────────────────
+
+describe('turn steering', () => {
+  const headOf = (result) => ({ ...segPool[result.current.headIdxRef.current % POOL_SIZE] });
+
+  it('screen directions pass straight through without turn steering', () => {
+    const { result } = renderHook(() => useSnake());
+    act(() => result.current.steer(DIR.UP));
+    const h0 = headOf(result);
+    tick();
+    expect(headOf(result)).toEqual({ x: h0.x, y: h0.y - 1 });
+  });
+
+  it('left / right turn relative to the heading; up / down only start the game', () => {
+    const { result } = renderHook(() => useSnake({ turnSteering: true }));
+    act(() => result.current.steer(DIR.UP));          // starts, keeps heading right
+    expect(result.current.state).toBe('running');
+    let h = headOf(result);
+    tick();
+    expect(headOf(result)).toEqual({ x: h.x + 1, y: h.y });
+
+    act(() => result.current.steer(DIR.LEFT));        // right → turn left → up
+    h = headOf(result);
+    tick();
+    expect(headOf(result)).toEqual({ x: h.x, y: h.y - 1 });
+
+    act(() => result.current.steer(DIR.DOWN));        // ignored while running
+    act(() => result.current.steer(DIR.RIGHT));       // up → turn right → right
+    h = headOf(result);
+    tick();
+    expect(headOf(result)).toEqual({ x: h.x + 1, y: h.y });
+  });
+
+  it('two quick turns build on the queued heading', () => {
+    const { result } = renderHook(() => useSnake({ turnSteering: true }));
+    act(() => result.current.steer(DIR.UP));
+    act(() => { result.current.steer(DIR.LEFT); result.current.steer(DIR.LEFT); });   // right → up → left
+    const h = headOf(result);
+    tick(); tick();
+    expect(headOf(result)).toEqual({ x: h.x - 1, y: h.y - 1 });
+  });
+});
+
 // ─── Score and level progression ─────────────────────────────────────────────
 
 describe('score and level', () => {

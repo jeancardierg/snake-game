@@ -11,6 +11,7 @@ import { paintSkin } from './skins';
 import { HATS, TAILS } from './accessories';
 import { paintBoardThumb } from './boards';
 import { FOODS } from './foods';
+import { paintViewThumb } from '../cameraViews';
 
 const skinUrls = new Map();
 export function skinSwatch(skin) {
@@ -24,6 +25,17 @@ export function skinSwatch(skin) {
 
 export function boardThumb(board, level) {
   try { return paintBoardThumb(board, level)?.toDataURL() ?? null; } catch { return null; }
+}
+
+const viewUrls = new Map();
+/** Sketch of the board from camera view `v` (Customize → View), or null. */
+export function viewThumb(v) {
+  if (!viewUrls.has(v.id)) {
+    let url;
+    try { url = paintViewThumb(v)?.toDataURL() ?? null; } catch { url = null; }
+    viewUrls.set(v.id, url);
+  }
+  return viewUrls.get(v.id);
 }
 
 let accessoryUrls = null;

@@ -384,6 +384,26 @@ body {
   outline-offset: 2px;
 }
 
+/* iPhone-only "Add to Home Screen" tip — its own line under the buttons. */
+.home-tip {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #aaa;
+}
+.home-tip-close {
+  background: none;
+  border: 0;
+  color: #888;
+  font-size: 12px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.home-tip-close:focus-visible { outline: 2px solid #4ecca3; outline-offset: 2px; }
+
 /* ── D-Pad ── */
 .dpad {
   display: grid;

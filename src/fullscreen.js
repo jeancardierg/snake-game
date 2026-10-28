@@ -56,3 +56,21 @@ export function onFullscreenChange(cb, doc = globalThis.document) {
     doc.removeEventListener('webkitfullscreenchange', cb);
   };
 }
+
+/** localStorage key set once the player closes the Home Screen tip. */
+export const HOME_SCREEN_TIP_KEY = 'snakeHomeScreenTipDismissed';
+
+/**
+ * True on iPhone / iPod (any browser: Chrome, Firefox etc. there all use
+ * Safari's engine, so none has element fullscreen) when the game is not
+ * already running from the Home Screen. iPad is excluded: it has the API.
+ */
+export function needsHomeScreenTip(win = globalThis.window) {
+  if (!win?.navigator) return false;
+  const nav = win.navigator;
+  if (!/iPhone|iPod/.test(nav.userAgent ?? '')) return false;
+  const installed = nav.standalone === true
+    || Boolean(win.matchMedia?.('(display-mode: standalone)').matches)
+    || Boolean(win.matchMedia?.('(display-mode: fullscreen)').matches);
+  return !installed && !isFullscreenSupported(win.document);
+}

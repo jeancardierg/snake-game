@@ -33,7 +33,7 @@ import { isSfxEnabled, setSfxEnabled } from './audio';
 import { Wardrobe } from './components/Wardrobe';
 import { loadLoadout, saveLoadout, randomLoadout } from './cosmetics/loadout';
 import { DEFAULT_VIEW, turnSteering, loadLast3dView, saveLast3dView } from './cameraViews';
-import { isFullscreenSupported, isFullscreen, toggleFullscreen, onFullscreenChange } from './fullscreen';
+import { isFullscreenSupported, isFullscreen, toggleFullscreen, onFullscreenChange, needsHomeScreenTip, HOME_SCREEN_TIP_KEY } from './fullscreen';
 import './index.css';
 
 export default function App() {
@@ -87,6 +87,17 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [fsSupported]);
+
+  // iPhone has no fullscreen button, so point at Add to Home Screen instead.
+  // Hidden once closed (remembered on the device) or when already installed.
+  const [homeTip, setHomeTip] = useState(() => {
+    try { if (localStorage.getItem(HOME_SCREEN_TIP_KEY)) return false; } catch { /* storage blocked */ }
+    return needsHomeScreenTip();
+  });
+  const closeHomeTip = useCallback(() => {
+    setHomeTip(false);
+    try { localStorage.setItem(HOME_SCREEN_TIP_KEY, '1'); } catch { /* storage blocked */ }
+  }, []);
 
   // ── Cosmetics (Customize menu) ──────────────────────────────────────────────
   // `saved` is what's stored on the device; `draft` is the menu's working copy
@@ -291,6 +302,12 @@ export default function App() {
           >
             {fsOn ? '⤡ Exit full' : '⛶ Full screen'}
           </button>
+        )}
+        {homeTip && (
+          <p className="home-tip" role="note">
+            📲 Full screen: Share → Add to Home Screen
+            <button className="home-tip-close" onClick={closeHomeTip} aria-label="Hide tip">✕</button>
+          </p>
         )}
       </div>
     </div>
